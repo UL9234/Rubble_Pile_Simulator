@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 # RubbleSim demo-render harness — render the pancake-collapse demo clips.
 #
-# 5 random seeds x 2 cameras = 10 clips (1280x720, 30 fps):
-#   seedNN_high   elevated camera framing the debris generation volume + the pile + the victim
+# 10 random scenes x 1 camera = 10 clips (1280x720, 30 fps):
 #   seedNN_orbit  low camera, one full 360 deg revolution around the generation centre
+#
+# The generation policy is fixed in code: layers are built one after another (a layer lands before the
+# next is built) and, inside a layer, fragments are released nearest-the-centre first, one every
+# sqrt(2 t / g) - the time a plate needs to fall clear of its own thickness. Together that keeps the
+# collapse inside the original footprint (see Docs/procedural_debris_generation.md 5.1).
+# CAMS="orbit high" adds the elevated camera back.
 #
 # The scenario itself (layer count, piece count, footprint, slab orientation, victim placement) is
 # configured through the simulator's own command-line arguments; this script only drives cameras and
@@ -29,10 +34,11 @@ FPS="${FPS:-30}"
 WIDTH="${WIDTH:-1280}"
 HEIGHT="${HEIGHT:-720}"
 CRF="${CRF:-16}"
-SEEDS="${SEEDS:-101 202 303 404 505}"
+SEEDS="${SEEDS:-101 202 303 404 505 606 707 808 909 1010}"
 HIGH_DUR="${HIGH_DUR:-20}"
 ORBIT_DUR="${ORBIT_DUR:-30}"
 ORBIT_SPEED="${ORBIT_SPEED:-12}"     # deg/s; 12 * 30 s = one full revolution
+CAMS="${CAMS:-orbit}"
 SHOT_TIMEOUT="${SHOT_TIMEOUT:-1800}"
 KEEP_FRAMES="${KEEP_FRAMES:-0}"
 
@@ -43,11 +49,12 @@ KEEP_FRAMES="${KEEP_FRAMES:-0}"
 # The victim sits on the +x boundary, pulled 1/3 of its body height towards the spawn centre.
 PANC_DENSITY="${PANC_DENSITY:-2400}"          # kg/m3 (reinforced concrete) -> mass = density * volume
 PANC_VICTIM_OFFSET="${PANC_VICTIM_OFFSET:--0.5667}"   # -1/3 * 1.7 m, i.e. inwards
+# horizontal edge noise, strong; the top outline uses noise seed + 1 so the break faces are not
+# vertical planes. Fragments are separated by the crack geometry alone (no repulsion anywhere).
 SCENARIO_ARGS="-procdebris 1 -numlayers 2 \
--spawnboundx 3.0 -spawnboundz 3.0 -spawnposy 3.0 \
+-spawnboundx 3.5 -spawnboundz 3.5 -spawnposy 3.0 \
 -proccellsmin 8 -proccellsmax 11 -procthicknessmin 0.12 -procthicknessmax 0.18 -proclayerspacing 3.0 \
--procnoise 1 -proccorners 1 -proccornerchance 1.0 -procedgestep 0.35 -procnoisescale 3.0 \
--procverticalnoise 0.15 -procrepulsion 2.5 -procrepulsionrange 1.2 \
+-procnoise 1 -proccorners 1 -proccornerchance 1.0 -procedgestep 0.35 -procnoisescale 2.0 -procnoisefraction 0.08 \
 -pancakelayergap 4 -pancakecatchfloor 1 \
 -pancakevictim 1 -pancakevictimedge 0 -pancakevictimheight 1.7 -pancakevictimyawspread 30 \
 -pancakevictimoffset ${PANC_VICTIM_OFFSET} -debrisdensity ${PANC_DENSITY}"
@@ -55,9 +62,9 @@ SCENARIO_ARGS="-procdebris 1 -numlayers 2 \
 # --- cameras --------------------------------------------------------------------------------------
 # high : sees the whole generation volume (drop band tops out at y = 3.8) down to the ground,
 #        aimed between the pile centre and the victim so both stay in frame
-HIGH_CAM="-demolook 0.4,1.2,0 -demoradius 2.8 -demodist 1.7 -demoelevation 45 -demofov 52"
+HIGH_CAM="-demolook 0.4,1.2,0 -demoradius 3.1 -demodist 1.7 -demoelevation 45 -demofov 52"
 # orbit: low angle, one full revolution around the generation centre
-ORBIT_CAM="-demolook 0.3,0.5,0 -demoradius 2.8 -demoelevation 10 -demodist 2.0 -demofov 55 -demoorbitspeed ${ORBIT_SPEED}"
+ORBIT_CAM="-demolook 0.3,0.5,0 -demoradius 3.1 -demoelevation 10 -demodist 2.0 -demofov 55 -demoorbitspeed ${ORBIT_SPEED}"
 
 if [[ -z "${DEST}" || "${DEST}" != /* || "${DEST}" == "/" ]]; then
   echo "[render] refusing to clean unsafe DEMO_OUT='${DEST}'" >&2
@@ -156,10 +163,14 @@ main() {
   local ran=0
 
   for seed in ${SEEDS}; do
-    local specs=(
-      "seed${seed}_high|overview|-randomseed ${seed} -demostart 0 -demoduration ${HIGH_DUR} ${HIGH_CAM} ${SCENARIO_ARGS}"
-      "seed${seed}_orbit|orbit|-randomseed ${seed} -demostart 0 -demoduration ${ORBIT_DUR} ${ORBIT_CAM} ${SCENARIO_ARGS}"
-    )
+    local specs=()
+    for cam in ${CAMS}; do
+      if [[ "${cam}" == "high" ]]; then
+        specs+=("seed${seed}_high|overview|-randomseed ${seed} -demostart 0 -demoduration ${HIGH_DUR} ${HIGH_CAM} ${SCENARIO_ARGS}")
+      else
+        specs+=("seed${seed}_orbit|orbit|-randomseed ${seed} -demostart 0 -demoduration ${ORBIT_DUR} ${ORBIT_CAM} ${SCENARIO_ARGS}")
+      fi
+    done
     for spec in "${specs[@]}"; do
       local name="${spec%%|*}"
       if [[ ${#wanted[@]} -gt 0 ]]; then

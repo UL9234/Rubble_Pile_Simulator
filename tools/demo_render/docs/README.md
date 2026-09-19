@@ -118,7 +118,7 @@ unity2022 -batchmode -nographics -quit -projectPath <项目根> -executeMethod V
 
 ### 4.1 程序化碎片生成（`-procdebris 1`）
 
-本工具只负责把场景渲染成视频；**生成算法本身（沃罗诺伊切割、切缝、共享边界噪声、放样、崩角、质量与斥力）
+本工具只负责把场景渲染成视频；**生成算法本身（沃罗诺伊切割、共享边界噪声、放样、崩角、质量与释放时序）
 是实现细节，文档见项目级文档** [`Docs/procedural_debris_generation.md`](../../../Docs/procedural_debris_generation.md)，
 那里有完整的步骤、参数表与已知限制。
 
@@ -128,13 +128,18 @@ unity2022 -batchmode -nographics -quit -projectPath <项目根> -executeMethod V
   不再使用 `-numobjs`，也**没有随机缩放**；
 * 层数与平面尺寸复用 `-numlayers` / `-spawnboundx|z`，层间距 `-proclayerspacing`（默认 3 m），
   第 0 层高度取 `-spawnposy`；
-* **所有层在同一帧生成**（层 k 底面位于 `spawnposy + k×3 m`，全部水平、无随机旋转），
-  之后等待 `-pancakelayergap` 秒让其坍塌落定，再 `FreezeDebris()`（销毁刚体、静态合批）；
+* **逐层生成**：下层落定（等 `-pancakelayergap`）后再建上层；层内按到中心距离**由内向外逐个释放**，
+  间隔 = 一块板自由落体自身厚度的时间 `sqrt(2t/g)`（200 mm → 0.202 s）。这套策略已写死在
+  `DebrisSpawner` 里（A/B 实测：铺开范围从 8–10 m 收敛到约 3.9–4.6 m，见 `Docs/` §5.1）；
+* 场景里**没有斥力、没有切缝、没有随机朝向/缩放**：碎片间的分离完全来自裂缝几何；
 * `player.log` 里可核对每层统计与冻结后的包围盒：
-  `procedural layer 1: 10 slabs, bottom plane y=3.00, cover 9.0/9.0 m2 ... 2 corner cuts`、
+  `procedural layer 1: 10 slabs, bottom plane y=3.00, cover 12.3/12.3 m2 ... 2 corner cuts; release interval 0.168 s ...`、
+  `edge noise 89 mm`（当前渲染的噪声振幅）、
   `debris world bounds after freeze: center=... size=...`。
 
-受害者模型：`Assets/MITLL/Models/Human/human-neutral.obj`## 5. 两个踩过的坑
+受害者模型：`Assets/MITLL/Models/Human/human-neutral.obj`
+
+## 5. 两个踩过的坑
 
 * **日志目录必须点号开头**：本目录经软链接暴露给 Unity，若日志放在 `logs/`，构建过程写 `build.log` 会被资源数据库
   反复重新导入 → `An infinite import loop has been detected`，**真实资产会静默导入失败**（曾导致构建出的播放器里没有模型）。

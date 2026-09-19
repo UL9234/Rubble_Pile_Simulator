@@ -86,5 +86,5 @@ sysinfo.txt
 /[Aa]ssets/[Ss]treamingAssets/aa/*
 
 # Runtime data
-/tools/demo_render/.work
-/tools/demo_render/.logs
+/tools/demo_render/.work/*
+/tools/demo_render/.logs/*

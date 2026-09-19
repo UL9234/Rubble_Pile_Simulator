@@ -42,10 +42,10 @@ public static class ProceduralSlabFactory
                                        //         separation is left to the slab repulsion in physics
         public float noiseAmplitude;   // <= 0: derive from the cell size via noiseFraction
         public float noiseFraction;    // noise amplitude as a fraction of the cell size
+        public int noiseSeed;          // scene seed: the top outline uses seed + 1
         public float edgeStep;         // target edge subdivision length (m)
         public float noiseScale;       // Perlin frequency (1/m)
         public bool edgeNoise;
-        public float verticalNoise;    // fraction of the thickness: how uneven the top face is
         public bool breakCorners;
         public float cornerChance;     // multiplies the angle-derived probability
         public float cornerDepth;      // <0: half the thickness
@@ -83,6 +83,14 @@ public static class ProceduralSlabFactory
         int target = Mathf.Max(1, s.cellsMin + rng.Next(s.cellsMax - s.cellsMin + 1));
         List<Vector2> sites = SampleSites(rect, target, rng);
 
+        // One amplitude for the whole layer (derived from the average cell size, not from each
+        // cell's own area): two neighbours must displace by exactly the same amount along their
+        // shared boundary, otherwise their mirror image relief no longer matches and the fragments
+        // can overlap or open a double width crack.
+        float noiseAmp = s.noiseAmplitude > 0f
+            ? s.noiseAmplitude
+            : Mathf.Clamp(s.noiseFraction * Mathf.Sqrt(rect.width * rect.height / target), 0.005f, 0.15f);
+
         foreach (Vector2 site in sites)
         {
             List<Vector2> cell = VoronoiCell(site, sites, rect);
@@ -105,22 +113,20 @@ public static class ProceduralSlabFactory
                 if (shrunk != null && shrunk.Count >= 3) inner = shrunk;
             }
 
-            // The relief is sampled on the shared Voronoi boundary and mirrored between neighbours,
-            // so a small amplitude only opens a hairline crack - it can never push one slab into
-            // another. Amplitude therefore scales with the cell size, not with a kerf.
-            float noiseAmp = s.noiseAmplitude > 0f
-                ? s.noiseAmplitude
-                : Mathf.Clamp(s.noiseFraction * Mathf.Sqrt(area), 0.005f, 0.025f);
-            int[] cornerIdx;
-            // One outline, duplicated for the top face. The noise is sampled on the *shared Voronoi
-            // boundary* (not on this cell's inset copy), so both neighbours along that boundary get the
-            // same displacement mirrored about it - the two crack faces stay complementary.
-            Vector2[] bottom = Subdivide(inner, cell, s.edgeStep,
-                                         s.edgeNoise ? noiseAmp : 0f, s.noiseScale, 0f, out cornerIdx);
-            Vector2[] top = (Vector2[])bottom.Clone();
+            // Two independent reliefs. The noise displaces points *horizontally* (along the edge
+            // normal) and is sampled on the shared Voronoi boundary, so both neighbours get the same
+            // displacement mirrored about it - the two crack faces stay complementary. The top
+            // outline uses the same seed shifted by one, so the break faces are not vertical planes;
+            // everything is derived from the single scene seed, hence reproducible.
+            int[] cornerIdx, topCornerIdx;
+            float bottomOffset = (s.noiseSeed % 997) * 0.31f;
+            float amplitude = s.edgeNoise ? noiseAmp : 0f;
+            Vector2[] bottom = Subdivide(inner, cell, s.edgeStep, amplitude, s.noiseScale,
+                                         bottomOffset, out cornerIdx);
+            Vector2[] top = Subdivide(inner, cell, s.edgeStep, amplitude, s.noiseScale,
+                                      bottomOffset + 1f, out topCornerIdx);
 
-            List<Vector3[]> faces = BuildPrism(bottom, top, thickness,
-                                               s.verticalNoise > 0f ? s.verticalNoise : 0f);
+            List<Vector3[]> faces = BuildPrism(bottom, top, thickness);
             if (s.breakCorners && cornerIdx.Length > 0)
             {
                 cornerCuts += BreakCorners(faces, bottom, cornerIdx, thickness, s, rng);
@@ -417,8 +423,7 @@ public static class ProceduralSlabFactory
     // ---------------------------------------------------------------------------------------------
     //  5. loft: outline (y = 0) -> outline (y = thickness)
     // ---------------------------------------------------------------------------------------------
-    private static List<Vector3[]> BuildPrism(Vector2[] bottom, Vector2[] top, float thickness,
-                                              float verticalNoise)
+    private static List<Vector3[]> BuildPrism(Vector2[] bottom, Vector2[] top, float thickness)
     {
         var faces = new List<Vector3[]>();
         int n = bottom.Length;
@@ -428,14 +433,9 @@ public static class ProceduralSlabFactory
         for (int i = 0; i < n; i++)
         {
             bottomFace[i] = new Vector3(bottom[n - 1 - i].x, 0f, bottom[n - 1 - i].y);  // reversed -> faces down
-            float y = thickness;
-            if (verticalNoise > 0f)
-            {
-                // Uneven top face ("as cast" concrete): the underside stays flat so slabs still rest.
-                float v = Mathf.PerlinNoise(top[i].x * 1.7f + 11f, top[i].y * 1.7f + 5f);
-                y = thickness * (1f + (v - 0.5f) * 2f * verticalNoise);
-            }
-            topFace[i] = new Vector3(top[i].x, y, top[i].y);
+            // The top outline is the bottom outline raised by exactly the slab thickness: constant
+            // thickness, so every top triangle shares one normal (no radial facet banding).
+            topFace[i] = new Vector3(top[i].x, thickness, top[i].y);
         }
         faces.Add(bottomFace);
         faces.Add(topFace);

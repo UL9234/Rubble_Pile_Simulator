@@ -64,9 +64,6 @@ public class DebrisSpawner : MonoBehaviour
     private float procCornerChance = 1f;
     private bool procEdgeNoise = true;
     private bool procBreakCorners = true;
-    private float procVerticalNoise = 0.15f;   // how uneven the top face of a slab is
-    private float procRepulsion = 2.5f;        // m/s^2 slab-to-slab separation (0 = off)
-    private float procRepulsionRange = 1.2f;   // m, horizontal
     private Color procSlabColor = new Color(0.78f, 0.77f, 0.74f);
     private float procThickness;            // sampled once per scene: same for every slab and layer
     private Material slabMaterial;
@@ -143,9 +140,6 @@ public class DebrisSpawner : MonoBehaviour
         procLayerSpacing = CustomArgs.GetWithDefault("proclayerspacing", 3f);
         procInset = CustomArgs.GetWithDefault("procinset", 0f);
         procEdgeStep = CustomArgs.GetWithDefault("procedgestep", 0.35f);   // coarse: angular break lines
-        procVerticalNoise = CustomArgs.GetWithDefault("procverticalnoise", 0.15f);
-        procRepulsion = CustomArgs.GetWithDefault("procrepulsion", 2.5f);
-        procRepulsionRange = CustomArgs.GetWithDefault("procrepulsionrange", 1.2f);
         Vector3 slabRgb = DemoArgsLikeColor();
         procSlabColor = new Color(slabRgb.x, slabRgb.y, slabRgb.z, 1f);
         procNoiseScale = CustomArgs.GetWithDefault("procnoisescale", 3f);
@@ -273,6 +267,13 @@ public class DebrisSpawner : MonoBehaviour
     /// Procedural generation: one Voronoi layer of floor slabs per requested layer, spaced
     /// procLayerSpacing metres apart, each layer tiling the spawn area.
     /// </summary>
+    private struct PendingSlab
+    {
+        public float radius;        // distance from the spawn centre: the release order is centre first
+        public float layerY;
+        public ProceduralSlabFactory.Slab slab;
+    }
+
     private IEnumerator GenerateProceduralLayers()
     {
         Material mat = ResolveSlabMaterial();
@@ -289,23 +290,29 @@ public class DebrisSpawner : MonoBehaviour
             inset = procInset,
             noiseAmplitude = 0f,
             noiseFraction = procNoiseFraction,
+            noiseSeed = random != null ? random.seed : 0,
             edgeStep = procEdgeStep,
             noiseScale = procNoiseScale,
             edgeNoise = procEdgeNoise,
-            verticalNoise = procVerticalNoise,
             breakCorners = procBreakCorners,
             cornerChance = procCornerChance,
             cornerDepth = -1f,
         };
 
         Debug.Log(string.Format(
-            "[DebrisSpawner] procedural slabs: {0} layers of {1}x{2} m, {3}-{4} cells each, thickness {5:F0} mm, layer spacing {6:F1} m",
+            "[DebrisSpawner] procedural slabs: {0} layers of {1}x{2} m, {3}-{4} cells each, thickness {5:F0} mm, layer spacing {6:F1} m, edge noise {7:F0} mm",
             numPiles, settings.width, settings.depth, settings.cellsMin, settings.cellsMax,
-            procThickness * 1000f, procLayerSpacing));
+            procThickness * 1000f, procLayerSpacing,
+            (settings.noiseAmplitude > 0f
+                ? settings.noiseAmplitude
+                : Mathf.Clamp(settings.noiseFraction * Mathf.Sqrt(settings.width * settings.depth / 10f), 0.005f, 0.15f)) * 1000f));
 
-        // Every layer is instantiated in the same frame: the floors hang above each other as flat,
-        // axis aligned planes (layer k bottom at baseY + k * spacing) and then collapse together.
+        // 1. build every layer's fragments first (layer k bottom plane sits at baseY + k * spacing)
+        var pending = new List<PendingSlab>();
         int totalSlabs = 0;
+
+        // Layer by layer: a layer is built, released, and left to land before the next one is built,
+        // so two layers never share the air space.
         for (int layer = 0; layer < numPiles; layer++)
         {
             float layerY = baseY + layer * procLayerSpacing;
@@ -321,51 +328,84 @@ public class DebrisSpawner : MonoBehaviour
                 continue;
             }
 
-            int index = 0;
-            foreach (ProceduralSlabFactory.Slab slab in slabs)
-            {
-                GameObject go = new GameObject("slab_L" + layer + "_" + index++);
-                go.transform.position = new Vector3(centreX + slab.center.x, layerY + slab.center.y,
-                                                    centreZ + slab.center.z);
-                go.transform.rotation = Quaternion.identity;
-
-                MeshFilter mf = go.AddComponent<MeshFilter>();
-                mf.sharedMesh = slab.mesh;
-                MeshRenderer mr = go.AddComponent<MeshRenderer>();
-                if (mat != null) mr.sharedMaterial = mat;
-
-                MeshCollider mc = go.AddComponent<MeshCollider>();
-                mc.sharedMesh = slab.mesh;
-                mc.convex = true;
-
-                Rigidbody rb = go.AddComponent<Rigidbody>();
-                rb.useGravity = true;
-                rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
-                float m = debrisDensity > 0f ? debrisDensity * slab.volume : 1f;
-                rb.mass = m;
-                RegisterMass(m);
-
-                objList.Add(go);
-            }
+            pending.Clear();
             float covered = 0f, areaMin = float.MaxValue, areaMax = 0f;
             foreach (ProceduralSlabFactory.Slab slab in slabs)
             {
                 covered += slab.footprint;
                 areaMin = Mathf.Min(areaMin, slab.footprint);
                 areaMax = Mathf.Max(areaMax, slab.footprint);
+                pending.Add(new PendingSlab
+                {
+                    radius = Mathf.Sqrt(slab.center.x * slab.center.x + slab.center.z * slab.center.z),
+                    layerY = layerY,
+                    slab = slab,
+                });
             }
             totalSlabs += slabs.Count;
+
+            // Release order: nearest the spawn centre first, rim last.
+            pending.Sort((a, b) => a.radius.CompareTo(b.radius));
+
+            // Fixed release policy (A/B tested, see Docs/procedural_debris_generation.md 5.1):
+            // one fragment every sqrt(2 t / g), the time a plate needs to fall clear of its own
+            // thickness (200 mm -> 0.202 s, this scene's thickness is printed below). Releasing the
+            // fragments together instead throws the whole layer 8-10 m wide.
+            float interval = Mathf.Sqrt(2f * procThickness / 9.81f);
+
+            for (int i = 0; i < pending.Count; i++)
+            {
+                SpawnSlab(pending[i], mat);
+                if (i + 1 < pending.Count)
+                {
+                    yield return new WaitForSeconds(interval);
+                }
+            }
+
             Debug.Log(string.Format(
-                "[DebrisSpawner] procedural layer {0}: {1} slabs, bottom plane y={2:F2}, cover {3:F1}/{4:F1} m2, piece area {5:F2}-{6:F2} m2, {7} corner cuts",
+                "[DebrisSpawner] procedural layer {0}: {1} slabs, bottom plane y={2:F2}, cover {3:F1}/{4:F1} m2, piece area {5:F2}-{6:F2} m2, {7} corner cuts; release interval {8:F3} s over {9:F2} s, radius {10:F2}-{11:F2} m",
                 layer + 1, slabs.Count, layerY, covered, settings.width * settings.depth,
-                areaMin, areaMax, cornerCuts));
+                areaMin, areaMax, cornerCuts, interval, interval * Mathf.Max(0, slabs.Count - 1),
+                pending[0].radius, pending[pending.Count - 1].radius));
+
+            // Let this layer land before the next one is generated.
+            yield return new WaitForSeconds(pancakeLayerGap);
         }
 
-        Debug.Log("[DebrisSpawner] " + totalSlabs + " slabs of " + numPiles +
-                  " layers spawned in one frame; waiting " + pancakeLayerGap.ToString("F1") + " s to settle");
+        Debug.Log(string.Format(
+            "[DebrisSpawner] {0} slabs of {1} layers released layer by layer, centre first; waiting {2:F1} s to settle",
+            totalSlabs, numPiles, pancakeLayerGap));
 
         // Let the collapse finish before freezing (Rigidbodies are removed and the pile is batched).
         yield return new WaitForSeconds(pancakeLayerGap);
+    }
+
+    private GameObject SpawnSlab(PendingSlab item, Material mat)
+    {
+        GameObject go = new GameObject("slab");
+        go.transform.position = new Vector3(spawnBounds.center.x + item.slab.center.x,
+                                            item.layerY + item.slab.center.y,
+                                            spawnBounds.center.z + item.slab.center.z);
+        go.transform.rotation = Quaternion.identity;          // no random orientation, ever
+
+        MeshFilter mf = go.AddComponent<MeshFilter>();
+        mf.sharedMesh = item.slab.mesh;
+        MeshRenderer mr = go.AddComponent<MeshRenderer>();
+        if (mat != null) mr.sharedMaterial = mat;
+
+        MeshCollider mc = go.AddComponent<MeshCollider>();
+        mc.sharedMesh = item.slab.mesh;
+        mc.convex = true;
+
+        Rigidbody rb = go.AddComponent<Rigidbody>();
+        rb.useGravity = true;
+        rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+        float m = debrisDensity > 0f ? debrisDensity * item.slab.volume : 1f;
+        rb.mass = m;
+        RegisterMass(m);
+
+        objList.Add(go);
+        return go;
     }
 
     private void RegisterMass(float m)
@@ -413,44 +453,6 @@ public class DebrisSpawner : MonoBehaviour
         float g = CustomArgs.GetWithDefault("procslabcolorg", procSlabColor.g);
         float b = CustomArgs.GetWithDefault("procslabcolorb", procSlabColor.b);
         return new Vector3(r, g, b);
-    }
-
-    /// <summary>
-    /// Slabs of the same floor must not stick together into one rigid block; a weak horizontal
-    /// repulsion between near-coplanar slabs keeps the seams between fragments visible.
-    /// </summary>
-    private void FixedUpdate()
-    {
-        if (!procDebris || procRepulsion <= 0f || objList.Count < 2) return;
-
-        float maxDy = Mathf.Max(0.05f, procThickness * 2.5f);
-        for (int i = 0; i < objList.Count; i++)
-        {
-            GameObject a = objList[i];
-            if (a == null) continue;
-            Rigidbody ra = a.GetComponent<Rigidbody>();
-            if (ra == null || ra.isKinematic) continue;
-            Vector3 pa = a.transform.position;
-
-            for (int j = i + 1; j < objList.Count; j++)
-            {
-                GameObject b = objList[j];
-                if (b == null) continue;
-                Rigidbody rb = b.GetComponent<Rigidbody>();
-                if (rb == null || rb.isKinematic) continue;
-                Vector3 pb = b.transform.position;
-
-                if (Mathf.Abs(pb.y - pa.y) > maxDy) continue;      // only slabs in the same layer band
-                float dx = pb.x - pa.x, dz = pb.z - pa.z;
-                float dist = Mathf.Sqrt(dx * dx + dz * dz);
-                if (dist > procRepulsionRange || dist < 1e-4f) continue;
-
-                float f = procRepulsion * (1f - dist / procRepulsionRange);
-                Vector3 dir = new Vector3(dx / dist, 0f, dz / dist);
-                ra.AddForce(-dir * (f * ra.mass));
-                rb.AddForce(dir * (f * rb.mass));
-            }
-        }
     }
 
     /// <summary>
