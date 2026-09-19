@@ -1,0 +1,34 @@
+[DemoDirector] silenced 2 ROS component(s)
+[DemoDirector] capture camera ready (1280x720)
+[DemoDirector] shot=seed505_orbit preset=orbit fps=30 1280x720 start=0s duration=30s frames=900 ride=main
+[DemoDirector] framing center=(0.35, 0.80, 0.00) radius=2.80 pileSize=(0.00, 0.00, 0.00)
+[DemoDirector] progress frame=30 captured=30 virtualTime=0.97s wall=2.4s lastCapture=59.5ms avgCapture=65.8ms worst=253.1ms
+[DemoDirector] progress frame=60 captured=60 virtualTime=1.97s wall=4.3s lastCapture=57.3ms avgCapture=62.6ms worst=253.1ms
+[DemoDirector] progress frame=90 captured=90 virtualTime=2.97s wall=6.1s lastCapture=58.8ms avgCapture=61.5ms worst=253.1ms
+[DemoDirector] progress frame=120 captured=120 virtualTime=3.97s wall=7.9s lastCapture=55.9ms avgCapture=60.6ms worst=253.1ms
+[DemoDirector] progress frame=150 captured=150 virtualTime=4.97s wall=9.6s lastCapture=58.1ms avgCapture=60.0ms worst=253.1ms
+[DemoDirector] progress frame=180 captured=180 virtualTime=5.97s wall=11.5s lastCapture=59.9ms avgCapture=59.8ms worst=253.1ms
+[DemoDirector] progress frame=210 captured=210 virtualTime=6.97s wall=13.3s lastCapture=57.6ms avgCapture=59.8ms worst=253.1ms
+[DemoDirector] progress frame=240 captured=240 virtualTime=7.97s wall=15.2s lastCapture=60.1ms avgCapture=59.9ms worst=253.1ms
+[DemoDirector] progress frame=270 captured=270 virtualTime=8.97s wall=17.0s lastCapture=56.1ms avgCapture=59.7ms worst=253.1ms
+[DemoDirector] progress frame=300 captured=300 virtualTime=9.97s wall=18.8s lastCapture=58.1ms avgCapture=59.5ms worst=253.1ms
+[DemoDirector] progress frame=330 captured=330 virtualTime=10.97s wall=20.6s lastCapture=58.8ms avgCapture=59.3ms worst=253.1ms
+[DemoDirector] progress frame=360 captured=360 virtualTime=11.97s wall=22.4s lastCapture=55.5ms avgCapture=59.1ms worst=253.1ms
+[DemoDirector] progress frame=390 captured=390 virtualTime=12.97s wall=24.1s lastCapture=54.7ms avgCapture=58.9ms worst=253.1ms
+[DemoDirector] progress frame=420 captured=420 virtualTime=13.97s wall=25.9s lastCapture=54.6ms avgCapture=58.8ms worst=253.1ms
+[DemoDirector] progress frame=450 captured=450 virtualTime=14.97s wall=27.6s lastCapture=58.0ms avgCapture=58.6ms worst=253.1ms
+[DemoDirector] progress frame=480 captured=480 virtualTime=15.97s wall=29.4s lastCapture=55.1ms avgCapture=58.6ms worst=253.1ms
+[DemoDirector] progress frame=510 captured=510 virtualTime=16.97s wall=31.2s lastCapture=59.8ms avgCapture=58.5ms worst=253.1ms
+[DemoDirector] progress frame=540 captured=540 virtualTime=17.97s wall=33.0s lastCapture=56.2ms avgCapture=58.5ms worst=253.1ms
+[DemoDirector] progress frame=570 captured=570 virtualTime=18.97s wall=34.8s lastCapture=60.1ms avgCapture=58.6ms worst=253.1ms
+[DemoDirector] progress frame=600 captured=600 virtualTime=19.97s wall=36.7s lastCapture=61.2ms avgCapture=58.7ms worst=253.1ms
+[DemoDirector] progress frame=630 captured=630 virtualTime=20.97s wall=38.5s lastCapture=60.3ms avgCapture=58.7ms worst=253.1ms
+[DemoDirector] progress frame=660 captured=660 virtualTime=21.97s wall=40.4s lastCapture=64.0ms avgCapture=58.7ms worst=253.1ms
+[DemoDirector] progress frame=690 captured=690 virtualTime=22.97s wall=42.5s lastCapture=65.7ms avgCapture=59.1ms worst=253.1ms
+[DemoDirector] progress frame=720 captured=720 virtualTime=23.97s wall=44.5s lastCapture=63.4ms avgCapture=59.4ms worst=253.1ms
+[DemoDirector] progress frame=750 captured=750 virtualTime=24.97s wall=46.3s lastCapture=58.3ms avgCapture=59.4ms worst=253.1ms
+[DemoDirector] progress frame=780 captured=780 virtualTime=25.97s wall=48.1s lastCapture=62.1ms avgCapture=59.4ms worst=253.1ms
+[DemoDirector] progress frame=810 captured=810 virtualTime=26.97s wall=49.9s lastCapture=59.2ms avgCapture=59.3ms worst=253.1ms
+[DemoDirector] progress frame=840 captured=840 virtualTime=27.97s wall=51.7s lastCapture=56.3ms avgCapture=59.3ms worst=253.1ms
+[DemoDirector] progress frame=870 captured=870 virtualTime=28.97s wall=53.5s lastCapture=59.3ms avgCapture=59.3ms worst=253.1ms
+[DemoDirector] progress frame=900 captured=900 virtualTime=29.97s wall=55.3s lastCapture=58.7ms avgCapture=59.2ms worst=253.1ms

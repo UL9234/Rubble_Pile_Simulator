@@ -94,3 +94,6 @@ MonoBehaviour:
   numToSpawn: 300
   spawnDelay: 5
   numPiles: 3
+  victimPrefab: {fileID: 919132149155446097, guid: a720bb1d9221e0527a8de89c833e759a,
+    type: 3}
+  victimMaterial: {fileID: 2100000, guid: f4cfa7a7dc390a371aeb90712611c00b, type: 2}

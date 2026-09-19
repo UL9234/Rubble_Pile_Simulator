@@ -1,0 +1,19 @@
+{
+  "shot": "seed404_orbit",
+  "preset": "orbit",
+  "fps": 30,
+  "width": 1280,
+  "height": 720,
+  "frames": 900,
+  "start_after_s": 0.000,
+  "duration_s": 30.000,
+  "frame_center": "(0.350, 0.800, 0.000)",
+  "frame_radius": 2.800,
+  "pile_bounds_center": "(0.000, 0.000, 0.000)",
+  "pile_bounds_size": "(0.000, 0.000, 0.000)",
+  "ride_target": "main",
+  "drive": "none",
+  "teleport_robot": false,
+  "time_scale_override": 1.000,
+  "arguments": "-batchmode \n-demodist 2.0\n-demoduration 30\n-demoelevation 10\n-demofov 55\n-demofps 30\n-demoheight 720\n-demolook 0.35,0.8,0\n-demoorbitspeed 12\n-demoout /data1/chh/dataset/rubble_dataset/demo\n-demopreset orbit\n-demoquit 1\n-demoradius 2.8\n-demoshot seed404_orbit\n-demostart 0\n-demotimescale 1\n-demowidth 1280\n-demowork /data1/chh/project/robosupport/software/sim/Rubble_Pile_Simulator/tools/demo_render/.work/seed404_orbit\n-force-vulkan \n-logfile /data1/chh/project/robosupport/software/sim/Rubble_Pile_Simulator/tools/demo_render/.work/seed404_orbit/player.log\n-numlayers 2\n-numobjs 30\n-pancake 1\n-pancakecatchfloor 1\n-pancakelayergap 4\n-pancakescalemax 3.52\n-pancakescalemin 1.28\n-pancakespawndelay 0.06\n-pancaketilt 20\n-pancakevictim 1\n-pancakevictimedge 0\n-pancakevictimheight 1.7\n-pancakevictimyawspread 30\n-randomseed 404\n-screen-height 720\n-screen-width 1280\n-spawnboundx 3.0\n-spawnboundy 1.6\n-spawnboundz 3.0\n-spawnposy 3.0\n"
+}

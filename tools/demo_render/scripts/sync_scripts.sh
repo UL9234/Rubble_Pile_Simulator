@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# RubbleSim demo-render harness (isolated tooling).
+# RubbleSim demo-render harness — expose the render-only sources to Unity.
 #
-# Unity only compiles C# that lives under Assets/, so this script exposes the harness (whose source of
-# truth is tools/demo_render/) to the project. Two modes:
+# Unity only compiles C# under Assets/, so this links (or copies) tools/demo_render into
+# Assets/DemoRender. The harness contains render tooling only; all simulation/generation logic lives
+# in the project itself (Assets/MITLL/...).
 #
-#   ./sync_scripts.sh symlink   # default: Assets/DemoRender -> ../tools/demo_render (single source of truth)
-#   ./sync_scripts.sh copy      # fallback: copy the .cs files into Assets/DemoRender (generated, gitignored)
+#   ./sync_scripts.sh symlink   # default: Assets/DemoRender -> ../tools/demo_render
+#   ./sync_scripts.sh copy      # fallback: copy the .cs files (generated, not tracked)
 #   ./sync_scripts.sh clean     # remove whatever we exposed
-#
-# Nothing outside Assets/DemoRender/ is ever touched, so the simulator's own assets stay pristine.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJ="$(cd "${HERE}/../.." && pwd)"
+ROOT="$(cd "${HERE}/.." && pwd)"
+PROJ="$(cd "${HERE}/../../.." && pwd)"
 DEST="${PROJ}/Assets/DemoRender"
 MODE="${1:-symlink}"
 
@@ -24,9 +24,9 @@ case "${MODE}" in
     ;;
   copy)
     rm -rf "${DEST}" "${DEST}.meta"
-    mkdir -p "${DEST}/Editor"
-    cp "${HERE}"/*.cs "${DEST}/"
-    cp "${HERE}/Editor"/*.cs "${DEST}/Editor/"
+    mkdir -p "${DEST}/runtime" "${DEST}/Editor"
+    cp "${ROOT}/runtime"/*.cs "${DEST}/runtime/"
+    cp "${ROOT}/Editor"/*.cs "${DEST}/Editor/"
     echo "[sync] copied harness sources into ${DEST}"
     ;;
   clean)
@@ -39,4 +39,4 @@ case "${MODE}" in
     ;;
 esac
 
-find "${DEST}" -maxdepth 2 -name "*.cs" | sort
+find "${DEST}" -name "*.cs" | sort
