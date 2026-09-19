@@ -447,9 +447,12 @@ public class DemoDirector : MonoBehaviour
         if (progEvery > 0 && frameIndex % progEvery == 0)
         {
             Log(string.Format(CultureInfo.InvariantCulture,
-                "[DemoDirector] progress frame={0} captured={1} virtualTime={2:F2}s wall={3:F1}s lastCapture={4:F1}ms avgCapture={5:F1}ms worst={6:F1}ms",
+                "[DemoDirector] progress frame={0} captured={1} virtualTime={2:F2}s wall={3:F1}s lastCapture={4:F1}ms avgCapture={5:F1}ms worst={6:F1}ms cam={7} rot={8} fov={9:F1}",
                 frameIndex, captured, Time.time, Time.realtimeSinceStartup,
-                captureMsLast, captured > 0 ? captureMsTotal / captured : 0f, captureMsWorst));
+                captureMsLast, captured > 0 ? captureMsTotal / captured : 0f, captureMsWorst,
+                shotCam != null ? shotCam.transform.position.ToString("F1") : "n/a",
+                shotCam != null ? shotCam.transform.eulerAngles.ToString("F0") : "n/a",
+                shotCam != null ? shotCam.fieldOfView : 0f));
         }
 
         if (captured >= captureFrames) Finish();

@@ -37,23 +37,27 @@ SHOT_TIMEOUT="${SHOT_TIMEOUT:-1800}"
 KEEP_FRAMES="${KEEP_FRAMES:-0}"
 
 # --- scenario (parsed by the simulator's own CustomArgs) ------------------------------------------
-# 2 layers x 30 pieces = 10% of the simulator default (300), 3 x 3 m footprint, slabs dropped
-# from 3 m with a +/-20 deg orientation perturbation, victim on the +x boundary (head outward).
-# Slab scale: 80% of the earlier doubled run (1.6-4.4 -> 1.28-3.52). Override with PANC_SCALE_MIN/MAX.
-PANC_SCALE_MIN="${PANC_SCALE_MIN:-1.28}"
-PANC_SCALE_MAX="${PANC_SCALE_MAX:-3.52}"
-SCENARIO_ARGS="-pancake 1 -numlayers 2 -numobjs 30 \
--spawnboundx 3.0 -spawnboundz 3.0 -spawnposy 3.0 -spawnboundy 1.6 \
--pancaketilt 20 -pancakescalemin ${PANC_SCALE_MIN} -pancakescalemax ${PANC_SCALE_MAX} \
--pancakelayergap 4 -pancakespawndelay 0.06 -pancakecatchfloor 1 \
--pancakevictim 1 -pancakevictimedge 0 -pancakevictimheight 1.7 -pancakevictimyawspread 30"
+# Fully procedural concrete slabs (ProceduralSlabFactory): one Voronoi layer per -numlayers, each
+# layer tiling the spawn area, layer spacing 3 m, whole-scene slab thickness 120-180 mm.
+# No prefab debris and no random scaling: each piece is generated at its real size.
+# The victim sits on the +x boundary, pulled 1/3 of its body height towards the spawn centre.
+PANC_DENSITY="${PANC_DENSITY:-2400}"          # kg/m3 (reinforced concrete) -> mass = density * volume
+PANC_VICTIM_OFFSET="${PANC_VICTIM_OFFSET:--0.5667}"   # -1/3 * 1.7 m, i.e. inwards
+SCENARIO_ARGS="-procdebris 1 -numlayers 2 \
+-spawnboundx 3.0 -spawnboundz 3.0 -spawnposy 3.0 \
+-proccellsmin 8 -proccellsmax 11 -procthicknessmin 0.12 -procthicknessmax 0.18 -proclayerspacing 3.0 \
+-procnoise 1 -proccorners 1 -proccornerchance 1.0 -procedgestep 0.35 -procnoisescale 3.0 \
+-procverticalnoise 0.15 -procrepulsion 2.5 -procrepulsionrange 1.2 \
+-pancakelayergap 4 -pancakecatchfloor 1 \
+-pancakevictim 1 -pancakevictimedge 0 -pancakevictimheight 1.7 -pancakevictimyawspread 30 \
+-pancakevictimoffset ${PANC_VICTIM_OFFSET} -debrisdensity ${PANC_DENSITY}"
 
 # --- cameras --------------------------------------------------------------------------------------
 # high : sees the whole generation volume (drop band tops out at y = 3.8) down to the ground,
 #        aimed between the pile centre and the victim so both stay in frame
-HIGH_CAM="-demolook 0.4,1.4,0 -demoradius 2.8 -demodist 1.7 -demoelevation 45 -demofov 52"
+HIGH_CAM="-demolook 0.4,1.2,0 -demoradius 2.8 -demodist 1.7 -demoelevation 45 -demofov 52"
 # orbit: low angle, one full revolution around the generation centre
-ORBIT_CAM="-demolook 0.35,0.8,0 -demoradius 2.8 -demoelevation 10 -demodist 2.0 -demofov 55 -demoorbitspeed ${ORBIT_SPEED}"
+ORBIT_CAM="-demolook 0.3,0.5,0 -demoradius 2.8 -demoelevation 10 -demodist 2.0 -demofov 55 -demoorbitspeed ${ORBIT_SPEED}"
 
 if [[ -z "${DEST}" || "${DEST}" != /* || "${DEST}" == "/" ]]; then
   echo "[render] refusing to clean unsafe DEMO_OUT='${DEST}'" >&2

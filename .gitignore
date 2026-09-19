@@ -84,3 +84,7 @@ sysinfo.txt
 # Temporary auto-generated Android Assets
 /[Aa]ssets/[Ss]treamingAssets/aa.meta
 /[Aa]ssets/[Ss]treamingAssets/aa/*
+
+# Runtime data
+/tools/demo_render/.work
+/tools/demo_render/.logs

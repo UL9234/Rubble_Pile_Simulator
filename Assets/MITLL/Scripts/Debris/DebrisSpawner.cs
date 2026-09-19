@@ -47,8 +47,37 @@ public class DebrisSpawner : MonoBehaviour
     private bool pancakeCatchFloor = true;
     private float victimHeight = 1.7f;
     private float victimYawSpread = 30f;
-    private float victimOffset;
+    private float victimOffset;             // + is outwards along the boundary normal
     private int victimEdge;                 // 0 = +x, 1 = -x, 2 = +z, 3 = -z
+
+    // --- fully procedural slab generation (optional) ---
+    private bool procDebris;
+    private int procCellsMin = 8;
+    private int procCellsMax = 11;
+    private float procThicknessMin = 0.12f;
+    private float procThicknessMax = 0.18f;
+    private float procLayerSpacing = 3f;
+    private float procInset;
+    private float procEdgeStep = 0.12f;
+    private float procNoiseScale = 3f;
+    private float procNoiseFraction = 0.015f;   // edge relief as a fraction of the cell size
+    private float procCornerChance = 1f;
+    private bool procEdgeNoise = true;
+    private bool procBreakCorners = true;
+    private float procVerticalNoise = 0.15f;   // how uneven the top face of a slab is
+    private float procRepulsion = 2.5f;        // m/s^2 slab-to-slab separation (0 = off)
+    private float procRepulsionRange = 1.2f;   // m, horizontal
+    private Color procSlabColor = new Color(0.78f, 0.77f, 0.74f);
+    private float procThickness;            // sampled once per scene: same for every slab and layer
+    private Material slabMaterial;
+
+    // --- physical mass of the debris (optional) ---
+    // Unity's Rigidbody mass is a fixed serialised value and is NOT recomputed when a piece is scaled,
+    // so every piece of the stock library weighs 1 kg no matter its size. Setting a density gives each
+    // piece the mass of its (scaled) collision volume instead.
+    private float debrisDensity;            // kg/m^3; <= 0 keeps the prefab mass
+    private float massMin, massMax, massSum;
+    private int massCount;
 
     // Start is called before the first frame update
     void Start()
@@ -88,7 +117,46 @@ public class DebrisSpawner : MonoBehaviour
         }
 
         ReadPancakeArgs();
-        if (pancakeCollapse && pancakeCatchFloor) CreateCatchFloor();
+        ReadProceduralArgs();
+        // Optional: give every piece the mass of its scaled collision volume (kg/m^3).
+        debrisDensity = CustomArgs.GetWithDefault("debrisdensity", 0f);
+        if (debrisDensity > 0f)
+        {
+            Debug.Log("[DebrisSpawner] volumetric debris mass enabled, density " + debrisDensity + " kg/m3");
+        }
+        if ((pancakeCollapse || procDebris) && pancakeCatchFloor) CreateCatchFloor();
+    }
+
+    /// <summary>
+    /// Fully procedural generation settings. The slab thickness is drawn once here so that every slab
+    /// of every layer shares it (a single "pour" of concrete for the whole scene).
+    /// </summary>
+    private void ReadProceduralArgs()
+    {
+        procDebris = CustomArgs.FloatToBool(CustomArgs.GetWithDefault("procdebris", 0));
+        if (!procDebris) return;
+
+        procCellsMin = Mathf.Max(1, (int)CustomArgs.GetWithDefault("proccellsmin", 8));
+        procCellsMax = Mathf.Max(procCellsMin, (int)CustomArgs.GetWithDefault("proccellsmax", 11));
+        procThicknessMin = CustomArgs.GetWithDefault("procthicknessmin", 0.12f);
+        procThicknessMax = Mathf.Max(procThicknessMin, CustomArgs.GetWithDefault("procthicknessmax", 0.18f));
+        procLayerSpacing = CustomArgs.GetWithDefault("proclayerspacing", 3f);
+        procInset = CustomArgs.GetWithDefault("procinset", 0f);
+        procEdgeStep = CustomArgs.GetWithDefault("procedgestep", 0.35f);   // coarse: angular break lines
+        procVerticalNoise = CustomArgs.GetWithDefault("procverticalnoise", 0.15f);
+        procRepulsion = CustomArgs.GetWithDefault("procrepulsion", 2.5f);
+        procRepulsionRange = CustomArgs.GetWithDefault("procrepulsionrange", 1.2f);
+        Vector3 slabRgb = DemoArgsLikeColor();
+        procSlabColor = new Color(slabRgb.x, slabRgb.y, slabRgb.z, 1f);
+        procNoiseScale = CustomArgs.GetWithDefault("procnoisescale", 3f);
+        procNoiseFraction = CustomArgs.GetWithDefault("procnoisefraction", 0.015f);
+        procCornerChance = CustomArgs.GetWithDefault("proccornerchance", 1f);
+        procEdgeNoise = CustomArgs.FloatToBool(CustomArgs.GetWithDefault("procnoise", 1));
+        procBreakCorners = CustomArgs.FloatToBool(CustomArgs.GetWithDefault("proccorners", 1));
+
+        procThickness = random != null
+            ? random.GetStaticFloat(procThicknessMin, procThicknessMax)
+            : Random.Range(procThicknessMin, procThicknessMax);
     }
 
     /// <summary>
@@ -156,13 +224,23 @@ public class DebrisSpawner : MonoBehaviour
             victim = null;
         }
 
+        massMin = massMax = massSum = 0f;
+        massCount = 0;
+
         StartCoroutine(SetUpScene());
 
 
     }
     IEnumerator SetUpScene()
     {
-        if (pancakeCollapse)
+        if (procDebris)
+        {
+            // Fully procedural slabs: the mesh already carries its own size and orientation.
+            Time.timeScale = 1f;
+            if (placeVictim) PlaceVictim();
+            yield return StartCoroutine(GenerateProceduralLayers());
+        }
+        else if (pancakeCollapse)
         {
             // Natural fall speed so the collapse reads on camera.
             Time.timeScale = 1f;
@@ -192,6 +270,190 @@ public class DebrisSpawner : MonoBehaviour
     }
 
     /// <summary>
+    /// Procedural generation: one Voronoi layer of floor slabs per requested layer, spaced
+    /// procLayerSpacing metres apart, each layer tiling the spawn area.
+    /// </summary>
+    private IEnumerator GenerateProceduralLayers()
+    {
+        Material mat = ResolveSlabMaterial();
+        float centreX = spawnBounds.center.x;
+        float centreZ = spawnBounds.center.z;
+        float baseY = CustomArgs.GetWithDefault("spawnposy", 3f);
+
+        var settings = new ProceduralSlabFactory.Settings
+        {
+            width = spawnBounds.size.x,
+            depth = spawnBounds.size.z,
+            cellsMin = procCellsMin,
+            cellsMax = procCellsMax,
+            inset = procInset,
+            noiseAmplitude = 0f,
+            noiseFraction = procNoiseFraction,
+            edgeStep = procEdgeStep,
+            noiseScale = procNoiseScale,
+            edgeNoise = procEdgeNoise,
+            verticalNoise = procVerticalNoise,
+            breakCorners = procBreakCorners,
+            cornerChance = procCornerChance,
+            cornerDepth = -1f,
+        };
+
+        Debug.Log(string.Format(
+            "[DebrisSpawner] procedural slabs: {0} layers of {1}x{2} m, {3}-{4} cells each, thickness {5:F0} mm, layer spacing {6:F1} m",
+            numPiles, settings.width, settings.depth, settings.cellsMin, settings.cellsMax,
+            procThickness * 1000f, procLayerSpacing));
+
+        // Every layer is instantiated in the same frame: the floors hang above each other as flat,
+        // axis aligned planes (layer k bottom at baseY + k * spacing) and then collapse together.
+        int totalSlabs = 0;
+        for (int layer = 0; layer < numPiles; layer++)
+        {
+            float layerY = baseY + layer * procLayerSpacing;
+            int seed = (random != null ? random.seed : 0) + 1013 * (layer + 1);
+            var rng = new System.Random(seed);
+
+            int cornerCuts;
+            List<ProceduralSlabFactory.Slab> slabs =
+                ProceduralSlabFactory.BuildLayer(settings, procThickness, rng, out cornerCuts);
+            if (slabs.Count == 0)
+            {
+                Debug.LogWarning("[DebrisSpawner] procedural layer " + layer + " produced no slabs");
+                continue;
+            }
+
+            int index = 0;
+            foreach (ProceduralSlabFactory.Slab slab in slabs)
+            {
+                GameObject go = new GameObject("slab_L" + layer + "_" + index++);
+                go.transform.position = new Vector3(centreX + slab.center.x, layerY + slab.center.y,
+                                                    centreZ + slab.center.z);
+                go.transform.rotation = Quaternion.identity;
+
+                MeshFilter mf = go.AddComponent<MeshFilter>();
+                mf.sharedMesh = slab.mesh;
+                MeshRenderer mr = go.AddComponent<MeshRenderer>();
+                if (mat != null) mr.sharedMaterial = mat;
+
+                MeshCollider mc = go.AddComponent<MeshCollider>();
+                mc.sharedMesh = slab.mesh;
+                mc.convex = true;
+
+                Rigidbody rb = go.AddComponent<Rigidbody>();
+                rb.useGravity = true;
+                rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+                float m = debrisDensity > 0f ? debrisDensity * slab.volume : 1f;
+                rb.mass = m;
+                RegisterMass(m);
+
+                objList.Add(go);
+            }
+            float covered = 0f, areaMin = float.MaxValue, areaMax = 0f;
+            foreach (ProceduralSlabFactory.Slab slab in slabs)
+            {
+                covered += slab.footprint;
+                areaMin = Mathf.Min(areaMin, slab.footprint);
+                areaMax = Mathf.Max(areaMax, slab.footprint);
+            }
+            totalSlabs += slabs.Count;
+            Debug.Log(string.Format(
+                "[DebrisSpawner] procedural layer {0}: {1} slabs, bottom plane y={2:F2}, cover {3:F1}/{4:F1} m2, piece area {5:F2}-{6:F2} m2, {7} corner cuts",
+                layer + 1, slabs.Count, layerY, covered, settings.width * settings.depth,
+                areaMin, areaMax, cornerCuts));
+        }
+
+        Debug.Log("[DebrisSpawner] " + totalSlabs + " slabs of " + numPiles +
+                  " layers spawned in one frame; waiting " + pancakeLayerGap.ToString("F1") + " s to settle");
+
+        // Let the collapse finish before freezing (Rigidbodies are removed and the pile is batched).
+        yield return new WaitForSeconds(pancakeLayerGap);
+    }
+
+    private void RegisterMass(float m)
+    {
+        if (massCount == 0)
+        {
+            massMin = massMax = m;
+        }
+        else
+        {
+            massMin = Mathf.Min(massMin, m);
+            massMax = Mathf.Max(massMax, m);
+        }
+        massSum += m;
+        massCount++;
+    }
+
+    /// <summary>
+    /// Plain untextured slab material (a "white model"): the shipped palette atlas left some faces
+    /// sampling its black area, and a flat material also makes the generated geometry easy to read.
+    /// Double sided so a stray back face can never make a slab look see-through.
+    /// </summary>
+    private Material ResolveSlabMaterial()
+    {
+        if (slabMaterial != null) return slabMaterial;
+
+        Shader sh = Shader.Find("Universal Render Pipeline/Lit");
+        if (sh == null) sh = Shader.Find("Standard");
+        if (sh == null) return null;
+
+        Material m = new Material(sh);
+        m.name = "ProceduralSlabPlain";
+        if (m.HasProperty("_BaseColor")) m.SetColor("_BaseColor", procSlabColor);
+        if (m.HasProperty("_Color")) m.SetColor("_Color", procSlabColor);
+        if (m.HasProperty("_Smoothness")) m.SetFloat("_Smoothness", 0.12f);
+        if (m.HasProperty("_Metallic")) m.SetFloat("_Metallic", 0f);
+        if (m.HasProperty("_Cull")) m.SetFloat("_Cull", 0f);
+        slabMaterial = m;
+        return m;
+    }
+
+    private Vector3 DemoArgsLikeColor()
+    {
+        float r = CustomArgs.GetWithDefault("procslabcolorr", procSlabColor.r);
+        float g = CustomArgs.GetWithDefault("procslabcolorg", procSlabColor.g);
+        float b = CustomArgs.GetWithDefault("procslabcolorb", procSlabColor.b);
+        return new Vector3(r, g, b);
+    }
+
+    /// <summary>
+    /// Slabs of the same floor must not stick together into one rigid block; a weak horizontal
+    /// repulsion between near-coplanar slabs keeps the seams between fragments visible.
+    /// </summary>
+    private void FixedUpdate()
+    {
+        if (!procDebris || procRepulsion <= 0f || objList.Count < 2) return;
+
+        float maxDy = Mathf.Max(0.05f, procThickness * 2.5f);
+        for (int i = 0; i < objList.Count; i++)
+        {
+            GameObject a = objList[i];
+            if (a == null) continue;
+            Rigidbody ra = a.GetComponent<Rigidbody>();
+            if (ra == null || ra.isKinematic) continue;
+            Vector3 pa = a.transform.position;
+
+            for (int j = i + 1; j < objList.Count; j++)
+            {
+                GameObject b = objList[j];
+                if (b == null) continue;
+                Rigidbody rb = b.GetComponent<Rigidbody>();
+                if (rb == null || rb.isKinematic) continue;
+                Vector3 pb = b.transform.position;
+
+                if (Mathf.Abs(pb.y - pa.y) > maxDy) continue;      // only slabs in the same layer band
+                float dx = pb.x - pa.x, dz = pb.z - pa.z;
+                float dist = Mathf.Sqrt(dx * dx + dz * dz);
+                if (dist > procRepulsionRange || dist < 1e-4f) continue;
+
+                float f = procRepulsion * (1f - dist / procRepulsionRange);
+                Vector3 dir = new Vector3(dx / dist, 0f, dz / dist);
+                ra.AddForce(-dir * (f * ra.mass));
+                rb.AddForce(dir * (f * rb.mass));
+            }
+        }
+    }
+
+    /// <summary>
     /// Lays the victim on the ground at the midpoint of one boundary of the spawn area: the body's
     /// long axis points along the outward normal (head outside, feet inside) with a random deviation
     /// of up to +/- victimYawSpread degrees from that centre line.
@@ -216,7 +478,8 @@ public class DebrisSpawner : MonoBehaviour
         Quaternion importRot = victim.transform.rotation;
         victim.transform.rotation = Quaternion.Euler(-90f, VictimYaw(), 0f) * importRot;
 
-        // Centre the body on the boundary midpoint, then rest it on the ground.
+        // Centre the body on the boundary midpoint (a negative offset insets it towards the spawn
+        // centre so the debris covers more of it), then rest it on the ground.
         Vector3 centre = new Vector3(spawnBounds.center.x, 0f, spawnBounds.center.z);
         Vector3 target = centre + EdgeOutward(victimEdge) * (EdgeHalfExtent(victimEdge) + victimOffset);
         victim.transform.position = target;
@@ -234,8 +497,10 @@ public class DebrisSpawner : MonoBehaviour
         bc.center = local.center;
         bc.size = local.size;
 
-        Debug.Log(string.Format("[DebrisSpawner] victim placed on edge {0} at {1} (yaw {2:F1} deg, height {3:F2} m)",
-            victimEdge, victim.transform.position.ToString("F2"), victim.transform.eulerAngles.y, victimHeight));
+        Debug.Log(string.Format(
+            "[DebrisSpawner] victim placed on edge {0} at {1} (yaw {2:F1} deg, height {3:F2} m, boundary offset {4:F2} m)",
+            victimEdge, victim.transform.position.ToString("F2"), victim.transform.eulerAngles.y,
+            victimHeight, victimOffset));
     }
 
     /// <summary>Yaw that puts the head along the outward normal, plus the random spread.</summary>
@@ -357,6 +622,8 @@ public class DebrisSpawner : MonoBehaviour
 
         ValidateDebrisColliders(debris);
 
+        if (debrisDensity > 0f) ApplyVolumetricMass(debris, scale);
+
         if (pancakeCollapse)
         {
             // Without continuous collision the fast slabs pass straight through the thin ground.
@@ -366,6 +633,46 @@ public class DebrisSpawner : MonoBehaviour
 
         objList.Add(debris);
         return debris;
+    }
+
+    /// <summary>
+    /// Give a piece the mass of its collision volume: mass = density * localVolume * scale^3.
+    /// Unity keeps the serialised Rigidbody mass when a piece is scaled, so without this every piece of
+    /// the stock library weighs 1 kg whether it is a pebble or a 3 m floor slab.
+    /// </summary>
+    private void ApplyVolumetricMass(GameObject debris, float scale)
+    {
+        Rigidbody rb = debris.GetComponent<Rigidbody>();
+        if (rb == null) return;
+
+        float vol = LocalCollisionVolume(debris) * scale * scale * scale;
+        float m = debrisDensity * vol;
+        if (m <= 0f) return;
+
+        rb.mass = m;
+        RegisterMass(m);
+    }
+
+    /// <summary>Volume of the piece in its own local (unscaled) space, from its collider or mesh.</summary>
+    private static float LocalCollisionVolume(GameObject go)
+    {
+        BoxCollider box = go.GetComponent<BoxCollider>();
+        if (box != null) return box.size.x * box.size.y * box.size.z;
+
+        MeshCollider mesh = go.GetComponent<MeshCollider>();
+        if (mesh != null && mesh.sharedMesh != null)
+        {
+            Vector3 s = mesh.sharedMesh.bounds.size;
+            return s.x * s.y * s.z;
+        }
+
+        Renderer r = go.GetComponent<Renderer>();
+        if (r != null)
+        {
+            Vector3 s = r.localBounds.size;
+            return s.x * s.y * s.z;
+        }
+        return 0f;
     }
 
     /// <summary>Near-horizontal slab: identity base orientation with a bounded tilt and a free yaw.</summary>
@@ -486,6 +793,26 @@ public class DebrisSpawner : MonoBehaviour
 
         Debug.Log(string.Format("[DebrisSpawner] frozen {0} pieces ({1} discarded below the ground)",
             objList.Count, outOfBounds.Count));
+
+        if (procDebris && objList.Count > 0)
+        {
+            Bounds b = new Bounds(objList[0].transform.position, Vector3.zero);
+            foreach (GameObject go in objList)
+            {
+                if (go == null) continue;
+                Renderer r = go.GetComponent<Renderer>();
+                b.Encapsulate(r != null ? r.bounds : new Bounds(go.transform.position, Vector3.zero));
+            }
+            Debug.Log(string.Format("[DebrisSpawner] debris world bounds after freeze: center={0} size={1}",
+                b.center.ToString("F2"), b.size.ToString("F2")));
+        }
+
+        if (debrisDensity > 0f && massCount > 0)
+        {
+            Debug.Log(string.Format(
+                "[DebrisSpawner] volumetric mass: {0} pieces, {1:F1}-{2:F1} kg each, {3:F0} kg total (density {4} kg/m3)",
+                massCount, massMin, massMax, massSum, debrisDensity));
+        }
 
     }
 

@@ -94,7 +94,7 @@ unity2022 -batchmode -nographics -quit -projectPath <项目根> -executeMethod V
 
 ## 4. 坍塌场景参数（属于模拟器，见 `DebrisSpawner.cs`）
 
-`-pancake 1` 打开煎饼式坍塌：板状碎块近水平下落、受害者平躺在生成区边界上。
+现在默认走**纯程序化生成**（`-procdebris 1`，见 §4.1）：不再使用 prefab 碎片库，也不再对碎片做随机缩放，每块板按真实尺寸生成。`-pancake 1`（不带 procdebris）仍保留旧的"预fab 板 + 近水平取向"模式，用于复现早期版本。
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
@@ -113,28 +113,33 @@ unity2022 -batchmode -nographics -quit -projectPath <项目根> -executeMethod V
 | `-pancakevictimheight <m>` | 1.7 | 身高，模型按包围盒自动缩放 |
 | `-pancakevictimyawspread <deg>` | 30 | 朝向相对「边界外法线」的随机范围：**头朝外、脚朝内 ± 该角度** |
 | `-pancakevictimoffset <m>` | 0 | 沿外法线平移（默认身体中心正好压在边界线上） |
+| `-debrisdensity <kg/m3>` | 0（关） | **体积质量**：`mass = 密度 × 碰撞体局部体积 × scale³`；0 表示沿用 prefab 里的固定质量；本渲染用 2400（钢筋混凝土） |
 | `-randomseed <int>` | 0(随机) | 5 个种子 → 5 个不同场景，堆积体完全可复现 |
 
-受害者模型：`Assets/MITLL/Models/Human/human-neutral.obj` —— **MakeHuman 基础网格**（写实、标准比例、
-无性别特征），资产部分 **CC0 1.0**，许可证与出处（`LICENSE-CC0-MakeHuman.txt`、`SOURCE.md`）与该资产同目录。
-上游 `base.obj` 的编辑辅助/关节标记几何（含 `helper-genital`）已剔除，只保留 `body` 组并重映射顶点
-（19158→13380 顶点）；**并且把 A 姿势的手臂改成了贴身姿态**——上游手臂既外张又前伸（手在 Z=+2.7 dm），
-仰卧时手会举在空中、被物理当成支撑把废墟顶起来，现在按测得的肩→手方向整条手臂刚性旋转到沿身体向下、
-略外张 8°、与背平面齐平（手从 (±4.96,1.24,+2.68) 变为 (±2.80,0.54,−0.82)，手臂最低点 −1.03 与躯干背侧 −1.02 齐平）。
-这些处理都在 `tools/model_prep/prepare_human_mesh.py` 里可复现。换模型：把文件放进同一目录，改 `VictimSetupEditor.ModelPath` 后重跑 `VictimSetupEditor.Wire`
-（该脚本可反复执行，会就地更新材质与 prefab 引用）。
+### 4.1 程序化碎片生成（`-procdebris 1`）
 
-> 尺寸演进：初版 0.8/2.2 → 翻倍 1.6/4.4 → **本轮为翻倍值的 80%，即 `PANC_SCALE_MIN/MAX` = 1.28/3.52**，
-> 生成区曾试过 2.6×2.6、4.0×4.0，**当前取 3.0×3.0**。
-> 想对比其它档位：`PANC_SCALE_MIN=1.6 PANC_SCALE_MAX=4.4 ./render_shots.sh`。
+本工具只负责把场景渲染成视频；**生成算法本身（沃罗诺伊切割、切缝、共享边界噪声、放样、崩角、质量与斥力）
+是实现细节，文档见项目级文档** [`Docs/procedural_debris_generation.md`](../../../Docs/procedural_debris_generation.md)，
+那里有完整的步骤、参数表与已知限制。
 
----
+渲染侧只需要知道：
 
-## 5. 两个踩过的坑
+* 场景由 `-procdebris 1` 打开，碎片数量来自生成器（每层 8–11 块，`-proccellsmin/max`），
+  不再使用 `-numobjs`，也**没有随机缩放**；
+* 层数与平面尺寸复用 `-numlayers` / `-spawnboundx|z`，层间距 `-proclayerspacing`（默认 3 m），
+  第 0 层高度取 `-spawnposy`；
+* **所有层在同一帧生成**（层 k 底面位于 `spawnposy + k×3 m`，全部水平、无随机旋转），
+  之后等待 `-pancakelayergap` 秒让其坍塌落定，再 `FreezeDebris()`（销毁刚体、静态合批）；
+* `player.log` 里可核对每层统计与冻结后的包围盒：
+  `procedural layer 1: 10 slabs, bottom plane y=3.00, cover 9.0/9.0 m2 ... 2 corner cuts`、
+  `debris world bounds after freeze: center=... size=...`。
+
+受害者模型：`Assets/MITLL/Models/Human/human-neutral.obj`## 5. 两个踩过的坑
 
 * **日志目录必须点号开头**：本目录经软链接暴露给 Unity，若日志放在 `logs/`，构建过程写 `build.log` 会被资源数据库
   反复重新导入 → `An infinite import loop has been detected`，**真实资产会静默导入失败**（曾导致构建出的播放器里没有模型）。
   现在日志固定在 `.logs/`、中间产物在 `.work/`（Unity 忽略点号开头的路径）。
+* **质量默认与尺寸无关**：Unity 的 `Rigidbody.mass` 是序列化值，运行时只改 `localScale` 不会重算质量，所以原库里每块都是 1 kg。`-debrisdensity` 打开后按碰撞体体积给质量（本渲染 2400 kg/m³ → 单块 0.1–935 kg，整堆约 15 t），堆积更"压得实"。日志里会打印 `volumetric mass: ... kg total` 便于核对。
 * **必须加物理地板 + CCD**：项目 `GroundPlane` 的碰撞体厚度≈0，快速板子会直接穿地，随后被 `FreezeDebris` 的
   `y < -0.5` 判据剔除（实测 60 块丢 23 块）。现在 `-pancake 1` 时会在 y=0 加一层 60×60×2 m 隐形地板，并把每块碎片的
   `collisionDetectionMode` 设为 `ContinuousDynamic`，60 块全部保住（`player.log` 里可见 `frozen 60 pieces (0 discarded...)`）。
