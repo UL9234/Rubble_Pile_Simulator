@@ -493,16 +493,45 @@ public class DebrisSpawner : MonoBehaviour
             foreach (Renderer r in victim.GetComponentsInChildren<Renderer>()) r.sharedMaterial = victimMaterial;
         }
 
-        // A box around the body gives the slabs something to pile onto.
-        Bounds local = LocalBounds(victim);
-        BoxCollider bc = victim.AddComponent<BoxCollider>();
-        bc.center = local.center;
-        bc.size = local.size;
+        // Collide against the body itself, not against its bounding box. A box around a lying human
+        // is mostly air: the slabs would rest on that invisible box and leave a large void between
+        // themselves and the body. The victim has no Rigidbody, so a non convex MeshCollider is
+        // allowed and follows the real surface (limbs, waist, head).
+        if (!AddBodyCollider(victim))
+        {
+            Bounds local = LocalBounds(victim);
+            BoxCollider bc = victim.AddComponent<BoxCollider>();
+            bc.center = local.center;
+            bc.size = local.size;
+            Debug.LogWarning("[DebrisSpawner] victim body mesh is not readable; fell back to a box collider");
+        }
 
         Debug.Log(string.Format(
             "[DebrisSpawner] victim placed on edge {0} at {1} (yaw {2:F1} deg, height {3:F2} m, boundary offset {4:F2} m)",
             victimEdge, victim.transform.position.ToString("F2"), victim.transform.eulerAngles.y,
             victimHeight, victimOffset));
+    }
+
+    /// <summary>
+    /// Gives the victim one non convex MeshCollider per body mesh part (the model is a single body
+    /// mesh, but this stays correct if the asset ever ships several). Returns false when no readable
+    /// mesh is available, in which case the caller falls back to a box.
+    /// </summary>
+    private bool AddBodyCollider(GameObject root)
+    {
+        bool any = false;
+        foreach (MeshFilter mf in root.GetComponentsInChildren<MeshFilter>())
+        {
+            Mesh mesh = mf.sharedMesh;
+            if (mesh == null || !mesh.isReadable) continue;
+
+            MeshCollider mc = mf.GetComponent<MeshCollider>();
+            if (mc == null) mc = mf.gameObject.AddComponent<MeshCollider>();
+            mc.sharedMesh = mesh;
+            mc.convex = false;                 // static victim: an exact surface, no convex hull webbing
+            any = true;
+        }
+        return any;
     }
 
     /// <summary>Yaw that puts the head along the outward normal, plus the random spread.</summary>

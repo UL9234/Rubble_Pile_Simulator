@@ -45,10 +45,32 @@ public static class VictimSetupEditor
         // Let the project own the material. The importer would otherwise create built-in-pipeline
         // materials, which render magenta under URP.
         ModelImporter importer = AssetImporter.GetAtPath(ModelPath) as ModelImporter;
-        if (importer != null && importer.materialImportMode != ModelImporterMaterialImportMode.None)
+        if (importer != null)
         {
-            importer.materialImportMode = ModelImporterMaterialImportMode.None;
-            importer.SaveAndReimport();
+            bool dirty = false;
+            if (importer.materialImportMode != ModelImporterMaterialImportMode.None)
+            {
+                importer.materialImportMode = ModelImporterMaterialImportMode.None;
+                dirty = true;
+            }
+            // The body is collided against with a non convex MeshCollider, and PhysX can only cook a
+            // collider from mesh data it can read on the CPU. The importer must not add a collider of
+            // its own either: that would be the bounding box this is replacing.
+            if (!importer.isReadable)
+            {
+                importer.isReadable = true;
+                dirty = true;
+            }
+            if (importer.addCollider)
+            {
+                importer.addCollider = false;
+                dirty = true;
+            }
+            if (dirty)
+            {
+                importer.SaveAndReimport();
+                Debug.Log("[VictimSetup] model import settings updated (no material, readable, no auto collider)");
+            }
         }
 
         Material mat = AssetDatabase.LoadAssetAtPath<Material>(MaterialPath);
