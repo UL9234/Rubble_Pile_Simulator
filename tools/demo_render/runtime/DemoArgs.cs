@@ -26,9 +26,10 @@ public static class DemoArgs
             if (i + 1 < argv.Length)
             {
                 string next = argv[i + 1];
-                float probe;
-                // Accept the next token as a value unless it looks like another flag.
-                if (next.Length > 0 && (next[0] != '-' || float.TryParse(next, NumberStyles.Float, CultureInfo.InvariantCulture, out probe)))
+                // Accept the next token as a value unless it looks like another flag. A leading '-'
+                // is fine when the token is a number *or a comma separated vector* of numbers, so
+                // "-demolook -1.5,0.5,0" works instead of silently falling back to auto framing.
+                if (next.Length > 0 && (next[0] != '-' || IsNumericList(next)))
                 {
                     val = next;
                     i++;
@@ -36,6 +37,23 @@ public static class DemoArgs
             }
             map[key] = val;
         }
+    }
+
+    /// <summary>
+    /// True when the token is a number or a comma separated list of numbers ("-1.5", "-1.5,0.5,0").
+    /// Used so a negative value is not mistaken for the next flag.
+    /// </summary>
+    private static bool IsNumericList(string token)
+    {
+        if (string.IsNullOrEmpty(token) || token[0] != '-') return false;
+        string[] parts = token.Split(',');
+        if (parts.Length == 0) return false;
+        float parsed;
+        for (int i = 0; i < parts.Length; i++)
+        {
+            if (!float.TryParse(parts[i], NumberStyles.Float, CultureInfo.InvariantCulture, out parsed)) return false;
+        }
+        return true;
     }
 
     public static bool Has(string key)

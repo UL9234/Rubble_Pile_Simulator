@@ -132,6 +132,9 @@ unity2022 -batchmode -nographics -quit -projectPath <项目根> -executeMethod V
   间隔 = 一块板自由落体自身厚度的时间 `sqrt(2t/g)`（200 mm → 0.202 s）。这套策略已写死在
   `DebrisSpawner` 里（A/B 实测：铺开范围从 8–10 m 收敛到约 3.9–4.6 m，见 `Docs/` §5.1）；
 * 场景里**没有斥力、没有切缝、没有随机朝向/缩放**：碎片间的分离完全来自裂缝几何；
+* **暴露钢筋**（`-rebar 1`，默认开）是纯视觉对象：中面虚拟网格与碎片侧壁的交点按对记录，每对一根钢筋，
+  两端埋入混凝土、按最小能量曲线弯曲、两端各自扫掠成短柱；没有刚体/碰撞体，不参与求解。
+  相关参数 `-rebargrid`（网格间距）、`-rebarthickness`（半径倍数）；
 * `player.log` 里可核对每层统计与冻结后的包围盒：
   `procedural layer 1: 10 slabs, bottom plane y=3.00, cover 12.3/12.3 m2 ... 2 corner cuts; release interval 0.168 s ...`、
   `edge noise 89 mm`（当前渲染的噪声振幅）、

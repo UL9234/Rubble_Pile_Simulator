@@ -56,6 +56,7 @@ public static class ProceduralSlabFactory
         public Mesh mesh;
         public Vector3 center;         // renderer-space centre of the piece (local space)
         public Vector2 size;           // XZ extent
+        public Vector2[] midOutline;   // mid height outline, in fragment local XZ space (CCW)
         public float footprint;        // 2D area of the fragment (m^2)
         public float volume;           // m^3
     }
@@ -134,7 +135,19 @@ public static class ProceduralSlabFactory
 
             // One palette colour per fragment (not per layer) so a pile reads as mixed debris.
             Slab slab = ToSlab(faces, thickness, rng.Next(PaletteBlocks.Length), Mathf.Abs(SignedArea(inner)));
-            if (slab.mesh != null) result.Add(slab);
+            if (slab.mesh != null)
+            {
+                // The rebar grid runs through the slab at mid thickness, so it crosses the side walls
+                // half way between the bottom and the top outline.
+                var mid = new Vector2[bottom.Length];
+                for (int i = 0; i < bottom.Length; i++)
+                {
+                    Vector2 m = (bottom[i] + top[i]) * 0.5f;
+                    mid[i] = new Vector2(m.x - slab.center.x, m.y - slab.center.z);
+                }
+                slab.midOutline = mid;
+                result.Add(slab);
+            }
         }
         return result;
     }
@@ -685,6 +698,7 @@ public static class ProceduralSlabFactory
         slab.mesh = mesh;
         slab.center = centre;
         slab.size = new Vector2(bounds.size.x, bounds.size.z);
+        slab.midOutline = null;                       // filled in by BuildLayer
         slab.footprint = footprint;
         slab.volume = volume;
         return slab;

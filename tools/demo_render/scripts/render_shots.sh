@@ -40,6 +40,7 @@ ORBIT_DUR="${ORBIT_DUR:-30}"
 ORBIT_SPEED="${ORBIT_SPEED:-12}"     # deg/s; 12 * 30 s = one full revolution
 CAMS="${CAMS:-orbit}"
 SPAWN_XZ="${SPAWN_XZ:-3.5}"                 # layer plane size (m)
+LAYERS="${LAYERS:-2}"                       # number of pancake layers
 CELLS="${CELLS:-8 11}"                      # fragments per layer (min max)
 NAME_PREFIX="${NAME_PREFIX:-}"              # clip name prefix, e.g. f35_n10-14_
 NO_CLEAN="${NO_CLEAN:-0}"                   # 1 = keep what is already in DEST (add a second batch)
@@ -55,13 +56,14 @@ PANC_DENSITY="${PANC_DENSITY:-2400}"          # kg/m3 (reinforced concrete) -> m
 PANC_VICTIM_OFFSET="${PANC_VICTIM_OFFSET:--0.5667}"   # -1/3 * 1.7 m, i.e. inwards
 # horizontal edge noise, strong; the top outline uses noise seed + 1 so the break faces are not
 # vertical planes. Fragments are separated by the crack geometry alone (no repulsion anywhere).
-SCENARIO_ARGS="-procdebris 1 -numlayers 2 \
+SCENARIO_ARGS="-procdebris 1 -numlayers ${LAYERS} \
 -spawnboundx ${SPAWN_XZ} -spawnboundz ${SPAWN_XZ} -spawnposy 3.0 \
 -proccellsmin $(echo ${CELLS} | cut -d' ' -f1) -proccellsmax $(echo ${CELLS} | cut -d' ' -f2) -procthicknessmin 0.12 -procthicknessmax 0.18 -proclayerspacing 3.0 \
 -procnoise 1 -proccorners 1 -proccornerchance 1.0 -procedgestep 0.35 -procnoisescale 2.0 -procnoisefraction 0.08 \
 -pancakelayergap 4 -pancakecatchfloor 1 \
 -pancakevictim 1 -pancakevictimedge 0 -pancakevictimheight 1.7 -pancakevictimyawspread 30 \
--pancakevictimoffset ${PANC_VICTIM_OFFSET} -debrisdensity ${PANC_DENSITY}"
+-pancakevictimoffset ${PANC_VICTIM_OFFSET} -debrisdensity ${PANC_DENSITY} \
+-rebar 1 -rebargrid 0.30 -rebarthickness 2.5"
 
 # --- cameras --------------------------------------------------------------------------------------
 # high : sees the whole generation volume (drop band tops out at y = 3.8) down to the ground,

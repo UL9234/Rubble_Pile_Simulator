@@ -61,6 +61,10 @@ public class DebrisSpawner : MonoBehaviour
     private float procEdgeStep = 0.12f;
     private float procNoiseScale = 3f;
     private float procNoiseFraction = 0.015f;   // edge relief as a fraction of the cell size
+    private bool rebarEnabled = true;          // exposed reinforcement bars between fragments
+    private float rebarGrid = 0.30f;           // spacing of the virtual bar grid (m)
+    private float rebarThickness = 1f;         // radius multiplier (real bars are barely visible at 720p)
+    private Material rebarMaterial;
     private float procCornerChance = 1f;
     private bool procEdgeNoise = true;
     private bool procBreakCorners = true;
@@ -144,6 +148,9 @@ public class DebrisSpawner : MonoBehaviour
         procSlabColor = new Color(slabRgb.x, slabRgb.y, slabRgb.z, 1f);
         procNoiseScale = CustomArgs.GetWithDefault("procnoisescale", 3f);
         procNoiseFraction = CustomArgs.GetWithDefault("procnoisefraction", 0.015f);
+        rebarEnabled = CustomArgs.FloatToBool(CustomArgs.GetWithDefault("rebar", 1f));
+        rebarGrid = Mathf.Max(0.05f, CustomArgs.GetWithDefault("rebargrid", 0.30f));
+        rebarThickness = Mathf.Max(0.05f, CustomArgs.GetWithDefault("rebarthickness", 1f));
         procCornerChance = CustomArgs.GetWithDefault("proccornerchance", 1f);
         procEdgeNoise = CustomArgs.FloatToBool(CustomArgs.GetWithDefault("procnoise", 1));
         procBreakCorners = CustomArgs.FloatToBool(CustomArgs.GetWithDefault("proccorners", 1));
@@ -353,13 +360,30 @@ public class DebrisSpawner : MonoBehaviour
             // fragments together instead throws the whole layer 8-10 m wide.
             float interval = Mathf.Sqrt(2f * procThickness / 9.81f);
 
+            // Rebar: a single virtual grid through the slab at mid thickness, strictly parallel and
+            // perpendicular to the generation boundary. Where it crosses the crack between two
+            // neighbours it marks a pair (bar out of one fragment, into the next). Planned before the
+            // first fragment of this layer is released.
+            ProceduralRebar.Plan rebarPlan = PlanRebar(pending, layer, centreX, centreZ, settings, rng);
+
+            var spawned = new Transform[pending.Count];
             for (int i = 0; i < pending.Count; i++)
             {
-                SpawnSlab(pending[i], mat);
+                spawned[i] = SpawnSlab(pending[i], mat).transform;
                 if (i + 1 < pending.Count)
                 {
                     yield return new WaitForSeconds(interval);
                 }
+            }
+
+            if (rebarPlan != null)
+            {
+                ProceduralRebar.BuildStats stats =
+                    ProceduralRebar.Build(rebarPlan, spawned, ResolveRebarMaterial());
+                Debug.Log(string.Format(
+                    "[DebrisSpawner] rebar layer {0}: {1} bars, length {2:F2}-{3:F2} m (random growth, cap 0.20 m); fragments with bars {4}/{5}, bars per fragment {6}-{7}",
+                    layer + 1, stats.bars, stats.minLength, stats.maxLength,
+                    stats.fragmentsWithBars, stats.fragments, stats.minBars, stats.maxBars));
             }
 
             Debug.Log(string.Format(
@@ -378,6 +402,62 @@ public class DebrisSpawner : MonoBehaviour
 
         // Let the collapse finish before freezing (Rigidbodies are removed and the pile is batched).
         yield return new WaitForSeconds(pancakeLayerGap);
+    }
+
+    /// <summary>
+    /// Plans the exposed reinforcement for one layer: builds the virtual grid crossings, keeps the
+    /// ones that straddle a crack as pairs, and creates one visual bar per pair.
+    /// </summary>
+    private ProceduralRebar.Plan PlanRebar(List<PendingSlab> pending, int layer,
+                                           float centreX, float centreZ,
+                                           ProceduralSlabFactory.Settings settings, System.Random rng)
+    {
+        if (!rebarEnabled || pending.Count < 2) return null;
+
+        var fragments = new ProceduralRebar.Fragment[pending.Count];
+        for (int i = 0; i < pending.Count; i++)
+        {
+            fragments[i].outline = pending[i].slab.midOutline;
+            fragments[i].plannedPosition = new Vector3(centreX + pending[i].slab.center.x,
+                                                       pending[i].layerY + pending[i].slab.center.y,
+                                                       centreZ + pending[i].slab.center.z);
+        }
+
+        // The virtual bar grid runs through the slab at MID thickness: layerY is the bottom face of
+        // the layer, so the plane has to be raised by half a slab. Anchoring it at layerY put every
+        // bar on the bottom (or, once a slab landed upside down, the top) face instead.
+        float midPlaneY = pending[0].layerY + procThickness * 0.5f;
+
+        ProceduralRebar.Plan plan = ProceduralRebar.Create(fragments,
+                               new Vector3(centreX, midPlaneY, centreZ),
+                               settings.width, settings.depth,
+                               rebarGrid,
+                               0.02f, 0.05f,                                    // embedded depth into the concrete
+                               0.005f * rebarThickness, 0.009f * rebarThickness, // bar radius
+                               0.30f, 0.70f,                                    // sweep fraction per end
+                               rng);
+        return plan.Count > 0 ? plan : null;
+    }
+
+    /// <summary>Rusty steel: dark enough to read against the white slabs.</summary>
+    private Material ResolveRebarMaterial()
+    {
+        if (rebarMaterial != null) return rebarMaterial;
+
+        Shader sh = Shader.Find("Universal Render Pipeline/Lit");
+        if (sh == null) sh = Shader.Find("Standard");
+        if (sh == null) return null;
+
+        Material m = new Material(sh);
+        m.name = "ProceduralRebarSteel";
+        Color rust = new Color(0.34f, 0.15f, 0.09f, 1f);
+        if (m.HasProperty("_BaseColor")) m.SetColor("_BaseColor", rust);
+        if (m.HasProperty("_Color")) m.SetColor("_Color", rust);
+        if (m.HasProperty("_Smoothness")) m.SetFloat("_Smoothness", 0.32f);
+        if (m.HasProperty("_Metallic")) m.SetFloat("_Metallic", 0.55f);
+        if (m.HasProperty("_Cull")) m.SetFloat("_Cull", 0f);   // thin tubes: never cull a back face
+        rebarMaterial = m;
+        return m;
     }
 
     private GameObject SpawnSlab(PendingSlab item, Material mat)
