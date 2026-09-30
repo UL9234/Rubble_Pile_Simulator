@@ -88,3 +88,9 @@ sysinfo.txt
 # Runtime data
 /tools/demo_render/.work/*
 /tools/demo_render/.logs/*
+# MuJoCo export intermediates
+/tools/mujoco_export/.work/
+/tools/mujoco_export/.logs/
+/tools/mujoco_export/**/__pycache__/
+
+/tools/mujoco_export/**/__pycache__.meta

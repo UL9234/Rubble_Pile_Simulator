@@ -12,7 +12,7 @@
 #
 # The scenario itself (layer count, piece count, footprint, slab orientation, victim placement) is
 # configured through the simulator's own command-line arguments; this script only drives cameras and
-# frames. Old renders in the output folder are removed first so repeated runs do not pile up.
+# frames. Existing renders are kept unless NO_CLEAN=0 is explicitly requested.
 #
 # Usage:
 #   ./render_shots.sh                          # all 10 clips
@@ -43,7 +43,7 @@ SPAWN_XZ="${SPAWN_XZ:-3.5}"                 # layer plane size (m)
 LAYERS="${LAYERS:-2}"                       # number of pancake layers
 CELLS="${CELLS:-8 11}"                      # fragments per layer (min max)
 NAME_PREFIX="${NAME_PREFIX:-}"              # clip name prefix, e.g. f35_n10-14_
-NO_CLEAN="${NO_CLEAN:-0}"                   # 1 = keep what is already in DEST (add a second batch)
+NO_CLEAN="${NO_CLEAN:-1}"                   # 1 = keep what is already in DEST (add a second batch)
 SHOT_TIMEOUT="${SHOT_TIMEOUT:-1800}"
 KEEP_FRAMES="${KEEP_FRAMES:-0}"
 
@@ -63,14 +63,15 @@ SCENARIO_ARGS="-procdebris 1 -numlayers ${LAYERS} \
 -pancakelayergap 4 -pancakecatchfloor 1 \
 -pancakevictim 1 -pancakevictimedge 0 -pancakevictimheight 1.7 -pancakevictimyawspread 30 \
 -pancakevictimoffset ${PANC_VICTIM_OFFSET} -debrisdensity ${PANC_DENSITY} \
--rebar 1 -rebargrid 0.30 -rebarthickness 2.5"
+-rebar 1 -rebargrid 0.30 -rebarthickness 2.5 \
+-terrainground ${TERRAIN_GROUND:-1} -terrainstep ${TERRAIN_STEP:-2} -terrainamplitude ${TERRAIN_AMPLITUDE:-2.4} \
+-terrainfrequency ${TERRAIN_FREQUENCY:-0.12} -terrainsize ${TERRAIN_SIZE:-80}"
 
 # --- cameras --------------------------------------------------------------------------------------
-# high : sees the whole generation volume (drop band tops out at y = 3.8) down to the ground,
-#        aimed between the pile centre and the victim so both stay in frame
-HIGH_CAM="-demolook 0.4,1.2,0 -demoradius 3.1 -demodist 1.7 -demoelevation 45 -demofov 52"
-# orbit: low angle, one full revolution around the generation centre
-ORBIT_CAM="-demolook 0.3,0.5,0 -demoradius ${ORBIT_RADIUS:-3.1} -demoelevation 10 -demodist 2.0 -demofov 55 -demoorbitspeed ${ORBIT_SPEED}"
+# high: elevated exterior view including the surrounding coarse terrain.
+HIGH_CAM="-demolook 0,1.0,0 -demoradius 5 -demodist 2.4 -demoelevation 40 -demofov 52"
+# orbit: exterior view, 12 m from the target, one full revolution around the generation centre
+ORBIT_CAM="-demolook 0,0.8,0 -demoradius ${ORBIT_RADIUS:-5} -demoelevation ${ORBIT_ELEVATION:-22} -demodist ${ORBIT_DISTANCE:-2.4} -demofov 55 -demoorbitspeed ${ORBIT_SPEED}"
 
 if [[ -z "${DEST}" || "${DEST}" != /* || "${DEST}" == "/" ]]; then
   echo "[render] refusing to clean unsafe DEMO_OUT='${DEST}'" >&2
@@ -132,6 +133,10 @@ run_shot() {
   echo "[render] player exit=${rc}"
   grep -E "\[DebrisSpawner\]|\[DemoDirector\]" "${sdir}/player.log" 2>/dev/null | tail -6 || true
 
+  if [[ "${rc}" -ne 0 ]]; then
+    echo "[render] ERROR: player failed; see ${sdir}/player.log" >&2
+    return "${rc}"
+  fi
   encode_shot "${name}"
 }
 

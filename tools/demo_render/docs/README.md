@@ -39,7 +39,7 @@ cd tools/demo_render/scripts
 ./sync_scripts.sh symlink     # 首次，或改动了脚本文件名后
 ./build_player.sh             # 构建 Linux 播放器（Xvfb + Vulkan）
 
-./render_shots.sh                        # 全部 10 段（会自动清空输出目录里的旧视频）
+./render_shots.sh                        # 全部 10 段（默认保留输出目录里的旧视频）
 ./render_shots.sh seed101_high           # 只渲染其中某几段
 SEEDS="7 8 9" ./render_shots.sh          # 换种子
 HIGH_DUR=16 ORBIT_DUR=24 ./render_shots.sh
@@ -47,7 +47,9 @@ KEEP_FRAMES=1 ./render_shots.sh          # 保留逐帧 PNG
 ```
 
 输出：`/data1/chh/dataset/rubble_dataset/demo/seed<NN>_{high,orbit}.mp4`（1280×720、30 fps、H.264 CRF 16）。
-**不生成画廊页与 README**，直接看视频即可；每次渲染会先清空输出目录，避免历次视频堆积占用空间。
+**不生成画廊页与 README**，直接看视频即可；默认保留已有视频，只有显式设置 `NO_CLEAN=0` 才清空输出目录。
+
+当前默认使用稀疏柏林噪声地面和外围环绕相机（距离 12 m、仰角 22°）。地形参数及新演示命令见 [地形文档](../../../Docs/coarse_perlin_ground.md)。
 
 首次在别的机器/新克隆上使用，还需要一次性把受害者模型接到生成器上（会改 `Managers.prefab` 的序列化引用，属于项目自身的接线）：
 

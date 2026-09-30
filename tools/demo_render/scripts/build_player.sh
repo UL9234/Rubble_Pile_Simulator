@@ -40,7 +40,7 @@ set -e
 echo "[build] unity exit=${rc}"
 grep -E "\[DemoBuild\]|error CS|Build completed|Build Failed" "${LOG}" | tail -20 || true
 
-if [[ ! -x "${BUILD_OUT}/RubbleSim.x86_64" ]]; then
+if [[ "${rc}" -ne 0 ]] || ! grep -q "\[DemoBuild\] BUILD OK" "${LOG}" || [[ ! -x "${BUILD_OUT}/RubbleSim.x86_64" ]]; then
   echo "[build] FAILED: player not produced (see ${LOG})" >&2
   exit 1
 fi

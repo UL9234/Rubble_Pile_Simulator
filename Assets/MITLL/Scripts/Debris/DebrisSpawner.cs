@@ -14,6 +14,10 @@ using UnityEngine;
 
 public class DebrisSpawner : MonoBehaviour
 {
+    // Exporters capture masses, inertia and velocities before the render optimization removes them.
+    public static event System.Action<DebrisSpawner> BeforeFreeze;
+    public Bounds GenerationBounds => spawnBounds;
+
     private RandomManager random;
     public GameManager gameManager;
     public WeightedItemCollectionSO debrisCollection;
@@ -39,6 +43,7 @@ public class DebrisSpawner : MonoBehaviour
     private bool placeVictim;
     private GameObject victim;
     private GameObject catchFloor;
+    private CoarsePerlinGround terrainGround;
     private float pancakeTilt = 20f;
     private float pancakeScaleMin = 0.8f;
     private float pancakeScaleMax = 2.2f;
@@ -125,7 +130,8 @@ public class DebrisSpawner : MonoBehaviour
         {
             Debug.Log("[DebrisSpawner] volumetric debris mass enabled, density " + debrisDensity + " kg/m3");
         }
-        if ((pancakeCollapse || procDebris) && pancakeCatchFloor) CreateCatchFloor();
+        terrainGround = CoarsePerlinGround.Create(spawnBounds, random != null ? random.seed : 0);
+        if (terrainGround == null && (pancakeCollapse || procDebris) && pancakeCatchFloor) CreateCatchFloor();
     }
 
     /// <summary>
@@ -287,6 +293,7 @@ public class DebrisSpawner : MonoBehaviour
         float centreX = spawnBounds.center.x;
         float centreZ = spawnBounds.center.z;
         float baseY = CustomArgs.GetWithDefault("spawnposy", 3f);
+        if (terrainGround != null) baseY += Mathf.Max(0, terrainGround.MaxHeight);
 
         var settings = new ProceduralSlabFactory.Settings
         {
@@ -567,6 +574,8 @@ public class DebrisSpawner : MonoBehaviour
         victim.transform.position = target;
         Bounds laid = CombinedBounds(victim);
         victim.transform.position += new Vector3(target.x - laid.center.x, -laid.min.y, target.z - laid.center.z);
+
+        if (terrainGround != null) terrainGround.PlaceOnSurface(victim);
 
         if (victimMaterial != null)
         {
@@ -867,10 +876,11 @@ public class DebrisSpawner : MonoBehaviour
 
     public void FreezeDebris()
     {
+        BeforeFreeze?.Invoke(this);
         List<GameObject> outOfBounds = new List<GameObject>();
         foreach (GameObject go in objList)
         {
-            if (go.transform.position.y < -0.5f)
+            if (go.transform.position.y < (terrainGround != null ? terrainGround.MinHeight - 0.5f : -0.5f))
             {
                 outOfBounds.Add(go);
             }
