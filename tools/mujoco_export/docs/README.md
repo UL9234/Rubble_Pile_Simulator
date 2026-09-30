@@ -3,6 +3,50 @@
 本工具导出当前生成场景的物理快照，提供可直接加载的 MJCF、模型资源和状态恢复接口。
 不包含奖励、策略、Gym 环境或训练代码。使用本机已有 `mujoco_sim` conda 环境，无需桌面或显示器。
 
+## 精简训练场景与 MuJoCo 环绕录像
+
+默认顺序生成 20 个通过沉降检查的场景，再从中等间隔选取 5 个，在 MuJoCo 中离屏录像：
+
+```bash
+bash tools/mujoco_export/scripts/run_training_batch.sh
+```
+
+两阶段也可独立运行，以便传入不同参数：
+
+```bash
+bash tools/mujoco_export/scripts/generate_training_scenes.sh \
+  --output-root /data1/chh/dataset/rubble_dataset/demo/mujoco_train \
+  --count 20 --seed-start 1000 --layers 2 --gpus 0 1 2 3 4 5 --workers 6 \
+  --settle-timeout 15 --linear-threshold 0.02 --angular-threshold 0.05 --dwell 1
+bash tools/mujoco_export/scripts/record_training_orbits.sh \
+  --scene-root /data1/chh/dataset/rubble_dataset/demo/mujoco_train \
+  --output-root /data1/chh/dataset/rubble_dataset/demo/mujoco_train_videos \
+  --count 5 --gpus 0 1 2 3 4
+```
+
+可用 `--seeds 101 505 ...` 指定初始种子；该参数会以种子数确定场景数。
+也可调 `--spawn-size X Z`、`--cells MIN MAX`、`--density`、`--layer-gap`、
+`--terrain-step`、`--terrain-amplitude`、`--terrain-frequency`、`--padding`、
+`--timestep` 和 `--validation-steps`。失败种子会记录在 `generation_report.json`，
+并用新的唯一种子重试，默认每个目标场景最多 4 次。
+录像可调 `--seeds`、`--fps`、`--duration`、`--width`、`--height`、
+`--orbit-speed`、`--impulse`、`--effect-at`。
+
+`mujoco_train/seed<seed>/` 只包含 `scene.xml`、所需 `assets/` 和 `metadata.json`。
+模型直接以已沉降位姿和零速度起步，运行时用标准 `mujoco.mj_step`；
+没有额外的阻尼回调、机器人、动作器或训练代码。质量、质心、惯量和碰撞几何在 XML 中；
+生成密度、用于求质量的体积、Unity 专有的物理参数及验证摘要在元数据中。
+不把 `scene.mjb`、原始大快照、录像帧或日志复制到训练场景目录。
+批量索引和单场景平均耗时记录在 `mujoco_train/index.jsonl` 与 `generation_report.json`。
+录像和元数据写到相邻的 `mujoco_train_videos/`。
+
+最后一块板释放后，Unity 最多再模拟 15 秒（默认值），要求所有动态刚体的线速度
+和角速度连续 1 秒小于所配阈值。超时或发现无效刚体则放弃该次种子；
+完整 MuJoCo 物理步进与 EGL 离屏渲染验证通过后才发布场景包。
+录像从静止场景起步，1 秒后只在录像进程中给两块高处板片初速度，让碰撞和坍落可见；
+这不会改动训练场景。Unity/PhysX 的沉降运行在 CPU 上，六个并行 worker 分配 GPU 0–5
+进行各自的 MuJoCo EGL 离屏验证；录像同样按 GPU 分配。
+
 ## 快速使用
 
 在项目根目录运行：
@@ -48,7 +92,7 @@ Python 默认使用 `/data1/chh/dependency/miniconda3/envs/mujoco_sim/bin/python
 | 文件 | 内容 |
 |---|---|
 | `scene.xml` | 可编辑 MJCF，使用相对资源路径，包含 `unity_snapshot` 初始关键帧 |
-| `assets/*.obj` | 各碎片、钢筋、假人、机器人等显示与凸碰撞网格 |
+| `assets/*.obj` | 各碎片、钢筋、假人等显示与凸碰撞网格 |
 | `scene.mjb` | 本机 MuJoCo 版本编译后的二进制模型；换版本时优先重新加载 XML |
 | `unity_snapshot.json` | Unity 原始场景、刚体、碰撞体、几何、相机及组件清单 |
 | `initial_state.npz` | 初始 qpos、qvel、time、mocap 位置与四元数 |
@@ -72,8 +116,9 @@ Unity 原始快照中保留质量、重心、主惯量、惯量坐标系、位�
 
 - 碎片保留独立动态自由刚体，钢筋的复合碰撞体仍属于各自碎片，不会被合成一个场景大网格。
 - 没有 Rigidbody 的假人与地形保持静态，不臆造质量或可变形身体。
-- 在这个时刻机器人仍是 Unity 的运动学刚体，导出为 mocap body，保留质量和惯量。
-  它稍后才会在原工程的 `GameManager.Initialize()` 中被切换为动态；本工具不提前改变它的状态。
+- 原工程主场景挂有用于其他模式的 `VineRobot` 预制体。使用 `-mjexport` 时，
+  导出器在废墟生成前从运行中的场景移除它；机器人刚体、碰撞体和相机均不进入环境快照或 MuJoCo 模型。
+  源场景文件不因此改变。导出脚本会检查快照中没有机器人和运动学刚体。
 - 坐标从 Unity `(x,y,z)` 转为 MuJoCo `(x,z,y)`；角速度作为轴向量转换为 `(-x,-z,-y)`。
 - 自由关节的平移速度是物体原点速度；由 Unity 重心速度减去 `ω × 重心偏移` 得到。
   角速度转换到 MuJoCo 所要求的局部坐标系。不能直接复制 Unity 的六维速度数组。

@@ -69,6 +69,7 @@ public sealed class MujocoSnapshot : MonoBehaviour
         public string[] arguments;
         public float time, fixedDeltaTime, captureDeltaTime, timeScale, defaultContactOffset, bounceThreshold;
         public Vector3 gravity, generationCenter, generationSize;
+        public DebrisSpawner.SettlementInfo settling;
         public int[] layerCollisionMasks;
         public List<Body> bodies = new List<Body>();
         public List<Geometry> colliders = new List<Geometry>();
@@ -95,6 +96,15 @@ public sealed class MujocoSnapshot : MonoBehaviour
         var exporter = go.AddComponent<MujocoSnapshot>();
         exporter.output = Path.GetFullPath(output);
         DebrisSpawner.BeforeFreeze += exporter.Capture;
+        // The authoring scene includes a controllable robot for other simulator modes.
+        // A rubble export is environment-only: remove it before debris simulation starts,
+        // so neither its collider nor its cameras can affect or enter the snapshot.
+        foreach (VineController robot in SceneComponents<VineController>())
+        {
+            Debug.Log("[MujocoSnapshot] removing robot from environment export: " + PathOf(robot.transform));
+            robot.gameObject.SetActive(false);
+            UnityEngine.Object.Destroy(robot.gameObject);
+        }
         foreach (Camera camera in SceneComponents<Camera>())
         {
             exporter.cameraEnabled[camera] = camera.enabled;
@@ -206,7 +216,8 @@ public sealed class MujocoSnapshot : MonoBehaviour
                 time = Time.time, fixedDeltaTime = Time.fixedDeltaTime, captureDeltaTime = Time.captureDeltaTime, timeScale = Time.timeScale,
                 gravity = Physics.gravity, defaultContactOffset = Physics.defaultContactOffset,
                 bounceThreshold = Physics.bounceThreshold, generationCenter = spawner.GenerationBounds.center,
-                generationSize = spawner.GenerationBounds.size, layerCollisionMasks = new int[32] };
+                generationSize = spawner.GenerationBounds.size, settling = spawner.ExportSettlement,
+                layerCollisionMasks = new int[32] };
             for (int i = 0; i < 32; i++) for (int j = 0; j < 32; j++)
                 if (!Physics.GetIgnoreLayerCollision(i, j)) snapshot.layerCollisionMasks[i] |= 1 << j;
             foreach (Transform t in SceneComponents<Transform>())

@@ -15,6 +15,15 @@ ROOT = Path(__file__).resolve().parents[3]
 TOOL = ROOT/'tools/mujoco_export'
 
 
+def require_environment_only(snapshot):
+    scene=json.loads(Path(snapshot).read_text())
+    robots=[node['path'] for node in scene['nodes'] if 'VineController' in node['components']]
+    if robots:
+        raise RuntimeError(f'Robot objects remain in the environment snapshot: {robots}')
+    if any(body['hasRigidbody'] and body['isKinematic'] for body in scene['bodies']):
+        raise RuntimeError('Environment snapshot unexpectedly contains a kinematic rigid body')
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--seeds',nargs='+',type=int,default=[101])
@@ -63,6 +72,7 @@ def main():
                 subprocess.run(cmd,cwd=ROOT,stdout=log,stderr=subprocess.STDOUT,timeout=300,check=True)
             snapshot=stage/'unity_snapshot.json'
             if not snapshot.exists():raise RuntimeError('Player did not produce a snapshot; rebuild without --no-build')
+            require_environment_only(snapshot)
             convert(snapshot,stage,args.padding,args.timestep)
             report=validate(stage,args.steps,args.render)
             # Write relative references; bundle remains usable after moving it to a different machine.

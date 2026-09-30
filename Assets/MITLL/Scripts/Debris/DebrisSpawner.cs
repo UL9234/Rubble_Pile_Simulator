@@ -14,9 +14,19 @@ using UnityEngine;
 
 public class DebrisSpawner : MonoBehaviour
 {
+    [System.Serializable]
+    public class SettlementInfo
+    {
+        public float linearThreshold, angularThreshold, dwellSeconds, timeoutSeconds;
+        public float elapsedSeconds, maxLinearSpeed, maxAngularSpeed;
+        public int dynamicBodies;
+        public bool passed;
+    }
+
     // Exporters capture masses, inertia and velocities before the render optimization removes them.
     public static event System.Action<DebrisSpawner> BeforeFreeze;
     public Bounds GenerationBounds => spawnBounds;
+    public SettlementInfo ExportSettlement { get; private set; }
 
     private RandomManager random;
     public GameManager gameManager;
@@ -271,9 +281,70 @@ public class DebrisSpawner : MonoBehaviour
             }
         }
 
+        if (System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-mjexport") >= 0)
+        {
+            yield return StartCoroutine(WaitForExportSettlement());
+            if (ExportSettlement == null || !ExportSettlement.passed) yield break;
+        }
         FreezeDebris();
         Time.timeScale = 1f;
         gameManager.Initialize();
+    }
+
+    private IEnumerator WaitForExportSettlement()
+    {
+        ExportSettlement = new SettlementInfo
+        {
+            linearThreshold = CustomArgs.GetWithDefault("mjlinvel", 0.02f),
+            angularThreshold = CustomArgs.GetWithDefault("mjangvel", 0.05f),
+            dwellSeconds = CustomArgs.GetWithDefault("mjdwell", 1f),
+            timeoutSeconds = CustomArgs.GetWithDefault("mjtimeout", 15f)
+        };
+        var info = ExportSettlement;
+        if (info.linearThreshold <= 0 || info.angularThreshold <= 0 || info.dwellSeconds <= 0 || info.timeoutSeconds < info.dwellSeconds)
+        {
+            Debug.LogError("[DebrisSpawner] invalid export settlement limits");
+            Application.Quit(4);
+            yield break;
+        }
+        float stableFor = 0f;
+        while (info.elapsedSeconds < info.timeoutSeconds)
+        {
+            yield return new WaitForFixedUpdate();
+            info.elapsedSeconds += Time.fixedDeltaTime;
+            float maxLinear = 0f, maxAngular = 0f;
+            int count = 0;
+            bool invalid = false;
+            foreach (Rigidbody rb in FindObjectsOfType<Rigidbody>())
+            {
+                if (rb.isKinematic || !rb.gameObject.activeInHierarchy) continue;
+                count++;
+                float linear = rb.velocity.magnitude, angular = rb.angularVelocity.magnitude;
+                if (float.IsNaN(linear) || float.IsInfinity(linear) || float.IsNaN(angular) || float.IsInfinity(angular)) invalid = true;
+                maxLinear = Mathf.Max(maxLinear, linear);
+                maxAngular = Mathf.Max(maxAngular, angular);
+                if (terrainGround != null && rb.position.y < terrainGround.MinHeight - 0.5f) invalid = true;
+            }
+            info.dynamicBodies = count;
+            info.maxLinearSpeed = maxLinear;
+            info.maxAngularSpeed = maxAngular;
+            if (invalid || count == 0)
+            {
+                Debug.LogError("[DebrisSpawner] export settlement failed: invalid or missing dynamic body");
+                Application.Quit(4);
+                yield break;
+            }
+            stableFor = maxLinear <= info.linearThreshold && maxAngular <= info.angularThreshold
+                ? stableFor + Time.fixedDeltaTime : 0f;
+            if (stableFor + 0.0001f >= info.dwellSeconds)
+            {
+                info.passed = true;
+                Debug.Log($"[DebrisSpawner] export settled: {count} bodies, elapsed={info.elapsedSeconds:F2}s, max linear={maxLinear:F4}m/s, max angular={maxAngular:F4}rad/s");
+                yield break;
+            }
+        }
+        Debug.LogError($"[DebrisSpawner] export settlement timeout after {info.timeoutSeconds:F2}s; max linear={info.maxLinearSpeed:F4}m/s, max angular={info.maxAngularSpeed:F4}rad/s");
+        Application.Quit(4);
     }
 
     /// <summary>
@@ -399,16 +470,19 @@ public class DebrisSpawner : MonoBehaviour
                 areaMin, areaMax, cornerCuts, interval, interval * Mathf.Max(0, slabs.Count - 1),
                 pending[0].radius, pending[pending.Count - 1].radius));
 
-            // Let this layer land before the next one is generated.
-            yield return new WaitForSeconds(pancakeLayerGap);
+            // In export mode, the 15 s stability budget starts at the final release.
+            // Earlier layers still need to land before the next layer is generated.
+            if (layer + 1 < numPiles || System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-mjexport") < 0)
+                yield return new WaitForSeconds(pancakeLayerGap);
         }
 
         Debug.Log(string.Format(
             "[DebrisSpawner] {0} slabs of {1} layers released layer by layer, centre first; waiting {2:F1} s to settle",
             totalSlabs, numPiles, pancakeLayerGap));
 
-        // Let the collapse finish before freezing (Rigidbodies are removed and the pile is batched).
-        yield return new WaitForSeconds(pancakeLayerGap);
+        // Non-export demos keep their original fixed delay. Exports use the velocity gate instead.
+        if (System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-mjexport") < 0)
+            yield return new WaitForSeconds(pancakeLayerGap);
     }
 
     /// <summary>
